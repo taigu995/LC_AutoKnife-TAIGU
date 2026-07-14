@@ -1,11 +1,20 @@
 // HarmonyLib stub assembly (0Harmony)
 namespace HarmonyLib
 {
+    public class HarmonyMethod
+    {
+        public System.Reflection.MethodInfo method;
+        public HarmonyMethod() { }
+        public HarmonyMethod(System.Reflection.MethodInfo method) { this.method = method; }
+        public HarmonyMethod(System.Type type, string methodName) { }
+    }
+
     public class Harmony
     {
         public Harmony(string id) { }
         public void PatchAll() { }
         public void PatchAll(System.Reflection.Assembly assembly) { }
+        public void Patch(System.Reflection.MethodInfo original, HarmonyMethod prefix = null, HarmonyMethod postfix = null, HarmonyMethod transpiler = null) { }
     }
 
     [System.AttributeUsage(System.AttributeTargets.Class | System.AttributeTargets.Method, AllowMultiple = true)]

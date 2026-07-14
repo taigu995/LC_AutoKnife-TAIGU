@@ -12,7 +12,7 @@ namespace AutoKnife
     {
         public const string ModGuid = "TAIGU.AutoKnife";
         public const string ModName = "AutoKnife";
-        public const string ModVersion = "1.0.9";
+        public const string ModVersion = "1.0.10";
 
         private Harmony _harmony;
         private static float _timeAtLastAttack = 0f;
@@ -22,7 +22,9 @@ namespace AutoKnife
         private static Type _playerControllerBType;
         private static Type _knifeItemType;
         private static MethodInfo _useItemOnClientMethod;
-        private static MethodInfo _activateItemMethod; // Fallback for V81
+        private static MethodInfo _activateItemMethod;
+        private static MethodInfo _updateMethod;
+        private static MethodInfo _hitKnifeMethod;
         private static FieldInfo _currentlyHeldObjectServerField;
         private static FieldInfo _timeAtLastDamageDealtField;
 
@@ -39,8 +41,9 @@ namespace AutoKnife
                 return;
             }
 
+            // Manual patching with runtime-resolved types
             _harmony = new Harmony(ModGuid);
-            _harmony.PatchAll(typeof(AutoKnifePlugin).Assembly);
+            ApplyPatches();
             Logger.LogInfo($"[TAIGU] {ModName} v{ModVersion} loaded successfully.");
         }
 
@@ -74,18 +77,36 @@ namespace AutoKnife
                     return false;
                 }
 
-                // Get UseItemOnClient method (try with different binding flags)
+                // Get Update method
+                _updateMethod = _playerControllerBType.GetMethod("Update",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (_updateMethod == null)
+                {
+                    Logger.LogError("[TAIGU] Update method not found");
+                    return false;
+                }
+
+                // Get HitKnife method
+                _hitKnifeMethod = _knifeItemType.GetMethod("HitKnife",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (_hitKnifeMethod == null)
+                {
+                    Logger.LogError("[TAIGU] HitKnife method not found");
+                    return false;
+                }
+
+                // Get UseItemOnClient method
                 _useItemOnClientMethod = _playerControllerBType.GetMethod("UseItemOnClient",
                     BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 if (_useItemOnClientMethod == null)
                 {
-                    // Try with parameters (might take an int slot parameter)
+                    // Try with parameters
                     _useItemOnClientMethod = _playerControllerBType.GetMethod("UseItemOnClient",
                         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
                         null, new Type[] { typeof(int) }, null);
                 }
                 
-                // Fallback: try ActivateItem_performed (V81 input system callback)
+                // Fallback: try ActivateItem_performed
                 MethodInfo activateItemMethod = null;
                 if (_useItemOnClientMethod == null)
                 {
@@ -99,7 +120,6 @@ namespace AutoKnife
                 
                 if (_useItemOnClientMethod == null && activateItemMethod == null)
                 {
-                    // Debug: log all methods containing "Use" or "Item"
                     var allMethods = _playerControllerBType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                     var matchingMethods = allMethods.Where(m => m.Name.Contains("Use") || m.Name.Contains("Item")).Select(m => m.Name).Distinct().ToList();
                     Logger.LogError($"[TAIGU] No suitable method found. Available methods: {string.Join(", ", matchingMethods)}");
@@ -117,12 +137,11 @@ namespace AutoKnife
                     return false;
                 }
 
-                // Get timeAtLastDamageDealt field from KnifeItem
+                // Get timeAtLastDamageDealt field
                 _timeAtLastDamageDealtField = _knifeItemType.GetField("timeAtLastDamageDealt",
                     BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 if (_timeAtLastDamageDealtField == null)
                 {
-                    // Try alternative field names
                     Logger.LogWarning("[TAIGU] timeAtLastDamageDealt field not found, trying alternatives...");
                     foreach (var field in _knifeItemType.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
                     {
@@ -154,133 +173,141 @@ namespace AutoKnife
             }
         }
 
-        // Patch PlayerControllerB.Update
-        [HarmonyPatch]
-        public static class PlayerControllerB_Update_Patch
+        private void ApplyPatches()
         {
-            public static bool Prefix(object __instance)
+            try
             {
-                try
+                // Patch PlayerControllerB.Update
+                var updatePrefix = new HarmonyMethod(typeof(AutoKnifePlugin), nameof(UpdatePrefix));
+                _harmony.Patch(_updateMethod, prefix: updatePrefix);
+                Logger.LogInfo("[TAIGU] Patched PlayerControllerB.Update");
+
+                // Patch KnifeItem.HitKnife
+                if (_hitKnifeMethod != null && _timeAtLastDamageDealtField != null)
                 {
-                    // Check if player is dead
-                    var isPlayerDeadField = __instance.GetType().GetField("isPlayerDead",
-                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    if (isPlayerDeadField != null)
-                    {
-                        bool isDead = (bool)isPlayerDeadField.GetValue(__instance);
-                        if (isDead) return true;
-                    }
-
-                    // Check if left mouse button is held down
-                    if (!Input.GetMouseButton(0))
-                    {
-                        return true;
-                    }
-
-                    // Check if holding a knife
-                    object heldItem = _currentlyHeldObjectServerField.GetValue(__instance);
-                    if (heldItem == null)
-                    {
-                        return true;
-                    }
-
-                    if (!_knifeItemType.IsInstanceOfType(heldItem))
-                    {
-                        return true;
-                    }
-
-                    // Check attack interval
-                    float currentTime = Time.realtimeSinceStartup;
-                    if (currentTime - _timeAtLastAttack < AttackInterval)
-                    {
-                        return true;
-                    }
-
-                    // Call the appropriate method
-                    if (_useItemOnClientMethod != null)
-                    {
-                        // Call UseItemOnClient (handle both parameterless and parameterized versions)
-                        var parameters = _useItemOnClientMethod.GetParameters();
-                        if (parameters.Length == 0)
-                        {
-                            _useItemOnClientMethod.Invoke(__instance, null);
-                        }
-                        else
-                        {
-                            // Try to get the current item slot
-                            object[] args = new object[parameters.Length];
-                            for (int i = 0; i < parameters.Length; i++)
-                            {
-                                if (parameters[i].ParameterType == typeof(int))
-                                {
-                                    // Try to get currentItemSlot field
-                                    var currentItemSlotField = __instance.GetType().GetField("currentItemSlot",
-                                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                                    if (currentItemSlotField != null)
-                                    {
-                                        args[i] = currentItemSlotField.GetValue(__instance);
-                                    }
-                                    else
-                                    {
-                                        args[i] = 0; // Default to slot 0
-                                    }
-                                }
-                                else
-                                {
-                                    args[i] = Type.Missing;
-                                }
-                            }
-                            _useItemOnClientMethod.Invoke(__instance, args);
-                        }
-                    }
-                    else if (_activateItemMethod != null)
-                    {
-                        // Fallback: call ActivateItem_performed with default parameters
-                        var parameters = _activateItemMethod.GetParameters();
-                        object[] args = new object[parameters.Length];
-                        for (int i = 0; i < parameters.Length; i++)
-                        {
-                            args[i] = Type.Missing;
-                        }
-                        try
-                        {
-                            _activateItemMethod.Invoke(__instance, args);
-                        }
-                        catch
-                        {
-                            // If it fails, try with null parameters
-                            _activateItemMethod.Invoke(__instance, null);
-                        }
-                    }
-                    _timeAtLastAttack = currentTime;
-
-                    return false; // Skip original Update to prevent double execution
+                    var hitKnifePostfix = new HarmonyMethod(typeof(AutoKnifePlugin), nameof(HitKnifePostfix));
+                    _harmony.Patch(_hitKnifeMethod, postfix: hitKnifePostfix);
+                    Logger.LogInfo("[TAIGU] Patched KnifeItem.HitKnife");
                 }
-                catch (Exception ex)
-                {
-                    // Silently fail to avoid breaking the game
-                    return true;
-                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[TAIGU] Failed to apply patches: {ex.Message}");
             }
         }
 
-        // Patch KnifeItem.HitKnife to remove cooldown
-        [HarmonyPatch]
-        public static class KnifeItem_HitKnife_Patch
+        // Manual patch methods (not using attributes)
+        public static bool UpdatePrefix(object __instance)
         {
-            public static void Postfix(object __instance)
+            try
             {
-                try
+                // Check if player is dead
+                var isPlayerDeadField = __instance.GetType().GetField("isPlayerDead",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (isPlayerDeadField != null)
                 {
-                    if (_timeAtLastDamageDealtField != null)
+                    bool isDead = (bool)isPlayerDeadField.GetValue(__instance);
+                    if (isDead) return true;
+                }
+
+                // Check if left mouse button is held down
+                if (!Input.GetMouseButton(0))
+                {
+                    return true;
+                }
+
+                // Check if holding a knife
+                object heldItem = _currentlyHeldObjectServerField.GetValue(__instance);
+                if (heldItem == null)
+                {
+                    return true;
+                }
+
+                if (!_knifeItemType.IsInstanceOfType(heldItem))
+                {
+                    return true;
+                }
+
+                // Check attack interval
+                float currentTime = Time.realtimeSinceStartup;
+                if (currentTime - _timeAtLastAttack < AttackInterval)
+                {
+                    return true;
+                }
+
+                // Call the appropriate method
+                if (_useItemOnClientMethod != null)
+                {
+                    var parameters = _useItemOnClientMethod.GetParameters();
+                    if (parameters.Length == 0)
                     {
-                        _timeAtLastDamageDealtField.SetValue(__instance, -1f);
+                        _useItemOnClientMethod.Invoke(__instance, null);
+                    }
+                    else
+                    {
+                        object[] args = new object[parameters.Length];
+                        for (int i = 0; i < parameters.Length; i++)
+                        {
+                            if (parameters[i].ParameterType == typeof(int))
+                            {
+                                var currentItemSlotField = __instance.GetType().GetField("currentItemSlot",
+                                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                                if (currentItemSlotField != null)
+                                {
+                                    args[i] = currentItemSlotField.GetValue(__instance);
+                                }
+                                else
+                                {
+                                    args[i] = 0;
+                                }
+                            }
+                            else
+                            {
+                                args[i] = Type.Missing;
+                            }
+                        }
+                        _useItemOnClientMethod.Invoke(__instance, args);
                     }
                 }
-                catch (Exception ex)
+                else if (_activateItemMethod != null)
                 {
-                    // Silently fail
+                    var parameters = _activateItemMethod.GetParameters();
+                    object[] args = new object[parameters.Length];
+                    for (int i = 0; i < parameters.Length; i++)
+                    {
+                        args[i] = Type.Missing;
+                    }
+                    try
+                    {
+                        _activateItemMethod.Invoke(__instance, args);
+                    }
+                    catch
+                    {
+                        _activateItemMethod.Invoke(__instance, null);
+                    }
                 }
+                _timeAtLastAttack = currentTime;
+
+                return false;
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        public static void HitKnifePostfix(object __instance)
+        {
+            try
+            {
+                if (_timeAtLastDamageDealtField != null)
+                {
+                    _timeAtLastDamageDealtField.SetValue(__instance, -1f);
+                }
+            }
+            catch
+            {
+                // Silently fail
             }
         }
     }
