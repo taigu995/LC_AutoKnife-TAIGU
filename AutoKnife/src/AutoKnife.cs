@@ -82,8 +82,27 @@ namespace AutoKnife
                     BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 if (_updateMethod == null)
                 {
-                    Logger.LogError("[TAIGU] Update method not found");
-                    return false;
+                    Logger.LogWarning("[TAIGU] Update method not found, listing available methods...");
+                    var allMethods = _playerControllerBType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    var methodNames = allMethods.Select(m => m.Name).Distinct().OrderBy(n => n).ToList();
+                    Logger.LogWarning($"[TAIGU] Available methods in PlayerControllerB: {string.Join(", ", methodNames)}");
+                    
+                    // Try to find an alternative method to patch
+                    // Look for methods that are called frequently (like LateUpdate, FixedUpdate, etc.)
+                    _updateMethod = _playerControllerBType.GetMethod("LateUpdate",
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (_updateMethod == null)
+                    {
+                        _updateMethod = _playerControllerBType.GetMethod("FixedUpdate",
+                            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    }
+                    
+                    if (_updateMethod == null)
+                    {
+                        Logger.LogError("[TAIGU] No suitable update method found");
+                        return false;
+                    }
+                    Logger.LogInfo($"[TAIGU] Using {_updateMethod.Name} as alternative to Update");
                 }
 
                 // Get HitKnife method
