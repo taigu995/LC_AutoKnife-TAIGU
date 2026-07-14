@@ -6,7 +6,6 @@ namespace GameNetcodeStuff
         public GrabbableObject currentlyHeldObjectServer;
         public UnityEngine.InputSystem.PlayerInput playerInput;
         public bool isPlayerDead;
-        public bool isLocalPlayerController;
 
         public void UseItemOnClient() { }
         public void UseItemOnClient(int slot) { }

@@ -1,9 +1,12 @@
 // AutoKnife - Merged Mod for Lethal Company V81
 // Combines: Auto-attack on hold + Remove knife attack cooldown
 // Author: TAIGU
-// Version: 1.0.1
+// Version: 1.0.2
 //
 // Changelog:
+//   1.0.2 - Bug fix:
+//           - Fixed: Removed isLocalPlayerController check that caused
+//                    MissingFieldException every frame in V81 (field doesn't exist)
 //   1.0.1 - Bug fixes:
 //           - Fixed: Changed HarmonyPrefix to HarmonyPostfix on Update patch
 //                    (original mod uses Postfix, not Prefix)
@@ -36,7 +39,7 @@ namespace AutoKnife
     {
         private const string ModGUID = "TAIGU.AutoKnife";
         private const string ModName = "AutoKnife";
-        private const string ModVersion = "1.0.1";
+        private const string ModVersion = "1.0.2";
 
         private Harmony _harmony;
         internal static ManualLogSource Log;
@@ -99,13 +102,15 @@ namespace AutoKnife.Patches
                 if (__instance == null)
                     return;
 
-                // FIX v1.0.1: Safety checks for player state
-                // Don't auto-attack if player is dead or not locally controlled
+                // FIX v1.0.1: Safety check for player state
+                // Don't auto-attack if player is dead
                 if (__instance.isPlayerDead)
                     return;
 
-                if (!__instance.isLocalPlayerController)
-                    return;
+                // Note: No explicit isLocalPlayerController check needed.
+                // The IsPressed() check on the input action implicitly ensures
+                // only the local player's input triggers the attack, because
+                // input actions are only active for the local player.
 
                 // Check if the player is holding a KnifeItem
                 GrabbableObject heldItem = __instance.currentlyHeldObjectServer;
