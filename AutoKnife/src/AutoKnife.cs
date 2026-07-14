@@ -12,7 +12,7 @@ namespace AutoKnife
     {
         public const string ModGuid = "TAIGU.AutoKnife";
         public const string ModName = "AutoKnife";
-        public const string ModVersion = "1.0.7";
+        public const string ModVersion = "1.0.9";
 
         private Harmony _harmony;
         private static float _timeAtLastAttack = 0f;
@@ -22,6 +22,7 @@ namespace AutoKnife
         private static Type _playerControllerBType;
         private static Type _knifeItemType;
         private static MethodInfo _useItemOnClientMethod;
+        private static MethodInfo _activateItemMethod; // Fallback for V81
         private static FieldInfo _currentlyHeldObjectServerField;
         private static FieldInfo _timeAtLastDamageDealtField;
 
@@ -83,14 +84,29 @@ namespace AutoKnife
                         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
                         null, new Type[] { typeof(int) }, null);
                 }
+                
+                // Fallback: try ActivateItem_performed (V81 input system callback)
+                MethodInfo activateItemMethod = null;
                 if (_useItemOnClientMethod == null)
+                {
+                    activateItemMethod = _playerControllerBType.GetMethod("ActivateItem_performed",
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (activateItemMethod != null)
+                    {
+                        Logger.LogInfo("[TAIGU] Using ActivateItem_performed as fallback");
+                    }
+                }
+                
+                if (_useItemOnClientMethod == null && activateItemMethod == null)
                 {
                     // Debug: log all methods containing "Use" or "Item"
                     var allMethods = _playerControllerBType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                     var matchingMethods = allMethods.Where(m => m.Name.Contains("Use") || m.Name.Contains("Item")).Select(m => m.Name).Distinct().ToList();
-                    Logger.LogError($"[TAIGU] UseItemOnClient method not found. Available methods: {string.Join(", ", matchingMethods)}");
+                    Logger.LogError($"[TAIGU] No suitable method found. Available methods: {string.Join(", ", matchingMethods)}");
                     return false;
                 }
+                
+                _activateItemMethod = activateItemMethod;
 
                 // Get currentlyHeldObjectServer field
                 _currentlyHeldObjectServerField = _playerControllerBType.GetField("currentlyHeldObjectServer",
@@ -180,38 +196,61 @@ namespace AutoKnife
                         return true;
                     }
 
-                    // Call UseItemOnClient (handle both parameterless and parameterized versions)
-                    var parameters = _useItemOnClientMethod.GetParameters();
-                    if (parameters.Length == 0)
+                    // Call the appropriate method
+                    if (_useItemOnClientMethod != null)
                     {
-                        _useItemOnClientMethod.Invoke(__instance, null);
-                    }
-                    else
-                    {
-                        // Try to get the current item slot
-                        object[] args = new object[parameters.Length];
-                        for (int i = 0; i < parameters.Length; i++)
+                        // Call UseItemOnClient (handle both parameterless and parameterized versions)
+                        var parameters = _useItemOnClientMethod.GetParameters();
+                        if (parameters.Length == 0)
                         {
-                            if (parameters[i].ParameterType == typeof(int))
+                            _useItemOnClientMethod.Invoke(__instance, null);
+                        }
+                        else
+                        {
+                            // Try to get the current item slot
+                            object[] args = new object[parameters.Length];
+                            for (int i = 0; i < parameters.Length; i++)
                             {
-                                // Try to get currentItemSlot field
-                                var currentItemSlotField = __instance.GetType().GetField("currentItemSlot",
-                                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                                if (currentItemSlotField != null)
+                                if (parameters[i].ParameterType == typeof(int))
                                 {
-                                    args[i] = currentItemSlotField.GetValue(__instance);
+                                    // Try to get currentItemSlot field
+                                    var currentItemSlotField = __instance.GetType().GetField("currentItemSlot",
+                                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                                    if (currentItemSlotField != null)
+                                    {
+                                        args[i] = currentItemSlotField.GetValue(__instance);
+                                    }
+                                    else
+                                    {
+                                        args[i] = 0; // Default to slot 0
+                                    }
                                 }
                                 else
                                 {
-                                    args[i] = 0; // Default to slot 0
+                                    args[i] = Type.Missing;
                                 }
                             }
-                            else
-                            {
-                                args[i] = Type.Missing;
-                            }
+                            _useItemOnClientMethod.Invoke(__instance, args);
                         }
-                        _useItemOnClientMethod.Invoke(__instance, args);
+                    }
+                    else if (_activateItemMethod != null)
+                    {
+                        // Fallback: call ActivateItem_performed with default parameters
+                        var parameters = _activateItemMethod.GetParameters();
+                        object[] args = new object[parameters.Length];
+                        for (int i = 0; i < parameters.Length; i++)
+                        {
+                            args[i] = Type.Missing;
+                        }
+                        try
+                        {
+                            _activateItemMethod.Invoke(__instance, args);
+                        }
+                        catch
+                        {
+                            // If it fails, try with null parameters
+                            _activateItemMethod.Invoke(__instance, null);
+                        }
                     }
                     _timeAtLastAttack = currentTime;
 
