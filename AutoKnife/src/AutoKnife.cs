@@ -18,7 +18,6 @@ using BepInEx;
 using BepInEx.Logging;
 using HarmonyLib;
 using UnityEngine;
-using UnityEngine.InputSystem;
 using GameNetcodeStuff;
 
 namespace AutoKnife
@@ -28,7 +27,7 @@ namespace AutoKnife
     {
         private const string ModGUID = "TAIGU.AutoKnife";
         private const string ModName = "AutoKnife";
-        private const string ModVersion = "1.0.4";
+        private const string ModVersion = "1.0.5";
 
         private Harmony _harmony;
         internal static ManualLogSource Log;
@@ -45,7 +44,7 @@ namespace AutoKnife
 
             Log.LogInfo($"[TAIGU] {ModName} v{ModVersion} loaded successfully.");
             Log.LogInfo("[TAIGU] Features: Auto-attack on hold + No knife cooldown");
-            Log.LogInfo("[TAIGU] Input: Mouse.current.leftButton.isPressed (direct detection)");
+            Log.LogInfo("[TAIGU] Input: Input.GetMouseButton(0) (Unity built-in, no version dependency)");
         }
 
         public static AutoKnifePlugin Instance { get; private set; }
@@ -82,13 +81,9 @@ namespace AutoKnife.Patches
                 if (heldItem == null || !(heldItem is KnifeItem))
                     return;
 
-                // FIX v1.0.4: Direct mouse detection via Unity Input System
-                // Mouse.current is a static property that works regardless of game version
-                Mouse mouse = Mouse.current;
-                if (mouse == null || mouse.leftButton == null)
-                    return;
-
-                if (!mouse.leftButton.isPressed)
+                // FIX v1.0.5: Use Unity built-in Input.GetMouseButton(0)
+                // No dependency on Unity.InputSystem types - avoids version mismatch
+                if (!Input.GetMouseButton(0))
                     return;
 
                 // Rate-limit the auto-attack

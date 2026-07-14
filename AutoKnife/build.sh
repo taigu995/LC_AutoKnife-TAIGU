@@ -22,7 +22,6 @@ mcs -target:library -out:AutoKnife.dll \
   -r:libs/BepInEx.dll \
   -r:libs/0Harmony.dll \
   -r:libs/UnityEngine.CoreModule.dll \
-  -r:libs/Unity.InputSystem.dll \
   -r:libs/Assembly-CSharp.dll \
   src/AutoKnife.cs
 

@@ -29,6 +29,23 @@ namespace UnityEngine
 
     public class MonoBehaviour : Behaviour { }
 
+    // Unity built-in Input (old Input Manager, always available)
+    public static class Input
+    {
+        public static bool GetMouseButton(int button) { return false; }
+        public static bool GetMouseButtonDown(int button) { return false; }
+        public static bool GetMouseButtonUp(int button) { return false; }
+        public static bool GetKey(KeyCode key) { return false; }
+        public static bool GetKeyDown(KeyCode key) { return false; }
+    }
+
+    public enum KeyCode
+    {
+        None = 0,
+        Mouse0 = 323,
+        Mouse1 = 324,
+    }
+
     public class ScriptableObject : Object { }
 
     public class GameObject : Object
