@@ -1,7 +1,18 @@
 // AutoKnife - Merged Mod for Lethal Company V81
 // Combines: Auto-attack on hold + Remove knife attack cooldown
 // Author: TAIGU
-// Version: 1.0.0
+// Version: 1.0.1
+//
+// Changelog:
+//   1.0.1 - Bug fixes:
+//           - Fixed: Changed HarmonyPrefix to HarmonyPostfix on Update patch
+//                    (original mod uses Postfix, not Prefix)
+//           - Fixed: Changed input action name from "Use" to "ActivateItem"
+//                    (matches original mod's FindAction target)
+//           - Fixed: Removed spurious ItemActivate patch that could crash
+//                    PatchAll() if the method doesn't exist in V81
+//           - Added: Player dead/state checks for safety
+//           - Added: Fallback input action name resolution
 
 using System;
 using System.Reflection;
@@ -17,15 +28,15 @@ namespace AutoKnife
     /// <summary>
     /// Main plugin class for AutoKnife mod.
     /// Merges two functionalities:
-    /// 1. Hold left mouse button to auto-attack with knife
-    /// 2. Remove knife attack cooldown (timeAtLastDamageDealt reset)
+    /// 1. Hold left mouse button to auto-attack with knife (from AutoKnifeAttack by Yan01h)
+    /// 2. Remove knife attack cooldown (from FastKnife by nexor)
     /// </summary>
     [BepInPlugin(ModGUID, ModName, ModVersion)]
     public class AutoKnifePlugin : BaseUnityPlugin
     {
         private const string ModGUID = "TAIGU.AutoKnife";
         private const string ModName = "AutoKnife";
-        private const string ModVersion = "1.0.0";
+        private const string ModVersion = "1.0.1";
 
         private Harmony _harmony;
         internal static ManualLogSource Log;
@@ -54,8 +65,11 @@ namespace AutoKnife.Patches
 {
     /// <summary>
     /// Patch 1: Auto-attack when holding left mouse button.
-    /// Targets PlayerControllerB.Update to continuously trigger knife use
-    /// while the left mouse button is held down.
+    /// Targets PlayerControllerB.Update with a Postfix to continuously trigger
+    /// knife use while the left mouse button is held down.
+    ///
+    /// NOTE: Uses HarmonyPostfix (not Prefix) to match the original mod behavior.
+    /// The original AutoKnifeAttack by Yan01h uses a Postfix on Update.
     /// </summary>
     [HarmonyPatch(typeof(PlayerControllerB), "Update")]
     public class PlayerControllerB_Update_Patch
@@ -66,18 +80,31 @@ namespace AutoKnife.Patches
         // Tuned for V81: fast but not server-crashing
         private const float ATTACK_INTERVAL = 0.1f;
 
+        // Cached input action reference for performance
+        private static InputAction _cachedUseAction;
+        private static bool _actionSearchDone = false;
+
         /// <summary>
-        /// Prefix patch on PlayerControllerB.Update.
+        /// Postfix patch on PlayerControllerB.Update.
         /// Checks if left mouse button is held and the player is holding a knife,
         /// then triggers UseItemOnClient at a controlled interval.
+        ///
+        /// FIX v1.0.1: Changed from HarmonyPrefix to HarmonyPostfix to match original.
         /// </summary>
-        [HarmonyPrefix]
-        private static void UpdatePrefix(PlayerControllerB __instance)
+        [HarmonyPostfix]
+        private static void UpdatePostfix(PlayerControllerB __instance)
         {
             try
             {
-                // Only process for the local player
                 if (__instance == null)
+                    return;
+
+                // FIX v1.0.1: Safety checks for player state
+                // Don't auto-attack if player is dead or not locally controlled
+                if (__instance.isPlayerDead)
+                    return;
+
+                if (!__instance.isLocalPlayerController)
                     return;
 
                 // Check if the player is holding a KnifeItem
@@ -85,19 +112,28 @@ namespace AutoKnife.Patches
                 if (heldItem == null || !(heldItem is KnifeItem))
                     return;
 
-                // Get the input action for the primary use/attack button
-                // In Lethal Company, this is typically the "Use" action bound to left mouse
-                InputAction useAction = null;
-                if (__instance.playerInput != null && __instance.playerInput.actions != null)
+                // FIX v1.0.1: Use correct action name "ActivateItem" (matching original mod)
+                // with fallback to "Use" for compatibility
+                if (!_actionSearchDone)
                 {
-                    useAction = __instance.playerInput.actions.FindAction("Use");
+                    _actionSearchDone = true;
+
+                    if (__instance.playerInput != null && __instance.playerInput.actions != null)
+                    {
+                        // Primary: "ActivateItem" (matches original AutoKnifeAttack mod)
+                        _cachedUseAction = __instance.playerInput.actions.FindAction("ActivateItem");
+
+                        // Fallback: "Use" (alternative action name)
+                        if (_cachedUseAction == null)
+                            _cachedUseAction = __instance.playerInput.actions.FindAction("Use");
+                    }
                 }
 
-                if (useAction == null)
+                if (_cachedUseAction == null)
                     return;
 
-                // Check if the left mouse button (Use action) is currently pressed
-                if (!useAction.IsPressed())
+                // Check if the left mouse button (ActivateItem action) is currently pressed
+                if (!_cachedUseAction.IsPressed())
                     return;
 
                 // Rate-limit the auto-attack to avoid flooding
@@ -121,7 +157,9 @@ namespace AutoKnife.Patches
     /// Patch 2: Remove knife attack cooldown.
     /// After HitKnife is called, resets the timeAtLastDamageDealt field
     /// to -1, effectively removing any cooldown between knife strikes.
-    /// Adapted for V81: uses reflection to handle potential field name changes.
+    /// Adapted for V81: uses reflection with fallback to handle potential field name changes.
+    ///
+    /// Based on FastKnife by nexor (original implementation).
     /// </summary>
     [HarmonyPatch(typeof(KnifeItem), "HitKnife")]
     public class KnifeItem_HitKnife_Patch
@@ -152,7 +190,7 @@ namespace AutoKnife.Patches
                     Type knifeType = typeof(KnifeItem);
                     BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
 
-                    // Primary target: timeAtLastDamageDealt (original field name)
+                    // Primary target: timeAtLastDamageDealt (original field name from FastKnife)
                     _timeAtLastDamageDealtField = knifeType.GetField("timeAtLastDamageDealt", flags);
 
                     // Fallback candidates for V81 compatibility
@@ -202,43 +240,6 @@ namespace AutoKnife.Patches
             catch (Exception ex)
             {
                 AutoKnife.AutoKnifePlugin.Log?.LogError($"[TAIGU] Cooldown removal patch error: {ex.Message}");
-            }
-        }
-    }
-
-    /// <summary>
-    /// Patch 3 (V81 Safety): ItemActivate postfix to prevent
-    /// the game from blocking rapid item usage.
-    /// Ensures the auto-attack isn't throttled by item activation guards.
-    /// </summary>
-    [HarmonyPatch(typeof(PlayerControllerB), "ItemActivate")]
-    public class PlayerControllerB_ItemActivate_Patch
-    {
-        [HarmonyPostfix]
-        private static void ItemActivatePostfix(PlayerControllerB __instance)
-        {
-            try
-            {
-                if (__instance == null)
-                    return;
-
-                // If holding a knife, ensure the item state allows continued use
-                GrabbableObject heldItem = __instance.currentlyHeldObjectServer;
-                if (heldItem != null && heldItem is KnifeItem)
-                {
-                    // Reset any item-level activation cooldown if present
-                    Type itemType = heldItem.GetType();
-                    FieldInfo isUsedField = itemType.GetField("isBeingUsed",
-                        BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-                    if (isUsedField != null)
-                    {
-                        isUsedField.SetValue(heldItem, false);
-                    }
-                }
-            }
-            catch
-            {
-                // Silently fail - this is a supplementary patch
             }
         }
     }
