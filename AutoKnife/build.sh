@@ -1,32 +1,30 @@
 #!/bin/bash
-# AutoKnife Build Script
-# Compiles the merged Lethal Company V81 mod from source
-# Requires: mono-mcs (apt-get install mono-mcs)
-
+# AutoKnife Build Script - Using actual game DLLs
 set -e
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPT_DIR"
 
-echo "=== AutoKnife Build ==="
-echo "[1/3] Compiling stub assemblies..."
+echo "=== Building AutoKnife v1.0.6 (Pure Reflection + Game DLLs) ==="
 
-mcs -target:library -out:libs/UnityEngine.CoreModule.dll stubs/UnityEngineStub.cs
-mcs -target:library -out:libs/Unity.InputSystem.dll -r:libs/UnityEngine.CoreModule.dll stubs/InputSystemStub.cs
+# Clean previous build
+rm -f AutoKnife.dll
+
+# Build stubs (BepInEx references UnityEngine, Harmony is standalone)
+echo "Building stubs..."
+mcs -target:library -out:libs/BepInEx.dll \
+  -r:/workspace/projects/assets/Managed/Managed/UnityEngine.CoreModule.dll \
+  -r:/workspace/projects/assets/Managed/Managed/netstandard.dll \
+  stubs/BepInExStub.cs
 mcs -target:library -out:libs/0Harmony.dll stubs/HarmonyStub.cs
-mcs -target:library -out:libs/BepInEx.dll -r:libs/UnityEngine.CoreModule.dll stubs/BepInExStub.cs
-mcs -target:library -out:libs/Assembly-CSharp.dll -r:libs/UnityEngine.CoreModule.dll -r:libs/Unity.InputSystem.dll stubs/AssemblyCSharpStub.cs
 
-echo "[2/3] Compiling AutoKnife.dll..."
-
+# Build the mod using actual game DLLs for Unity types
+# This eliminates all version mismatch issues
+echo "Building AutoKnife.dll..."
 mcs -target:library -out:AutoKnife.dll \
   -r:libs/BepInEx.dll \
   -r:libs/0Harmony.dll \
-  -r:libs/UnityEngine.CoreModule.dll \
-  -r:libs/Assembly-CSharp.dll \
+  -r:/workspace/projects/assets/Managed/Managed/UnityEngine.CoreModule.dll \
+  -r:/workspace/projects/assets/Managed/Managed/Unity.InputSystem.dll \
+  -r:/workspace/projects/assets/Managed/Managed/Assembly-CSharp.dll \
+  -r:/workspace/projects/assets/Managed/Managed/netstandard.dll \
   src/AutoKnife.cs
 
-echo "[3/3] Verifying..."
-strings -e l AutoKnife.dll | grep "TAIGU"
-echo ""
-echo "=== Build complete: AutoKnife.dll ==="
-ls -la AutoKnife.dll
+echo "Build complete: AutoKnife.dll ($(stat -c%s AutoKnife.dll) bytes)"
