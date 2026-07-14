@@ -16,7 +16,7 @@ namespace AutoKnife
 
         private Harmony _harmony;
         private static float _timeAtLastAttack = 0f;
-        private const float AttackInterval = 0.1f;
+        private const float AttackInterval = 0.05f;
         private static BepInEx.Logging.ManualLogSource _staticLogger;
 
         // Cached types
