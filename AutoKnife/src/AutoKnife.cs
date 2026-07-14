@@ -12,7 +12,7 @@ namespace AutoKnife
     {
         public const string ModGuid = "TAIGU.AutoKnife";
         public const string ModName = "AutoKnife";
-        public const string ModVersion = "1.0.19";
+        public const string ModVersion = "1.0.20";
 
         private Harmony _harmony;
         private static float _timeAtLastAttack = 0f;
@@ -34,7 +34,7 @@ namespace AutoKnife
             _staticLogger = Logger;
             _staticLogger.LogInfo($"[TAIGU] {ModName} v{ModVersion} loading...");
             _staticLogger.LogInfo($"[TAIGU] Features: Auto-attack on hold + No knife cooldown");
-            _staticLogger.LogInfo($"[TAIGU] Input: Input.GetMouseButton(0) (direct mouse detection)");
+            _staticLogger.LogInfo($"[TAIGU] Input: Mouse.current.leftButton.isPressed (new Input System via reflection)");
 
             // Initialize types via reflection
             if (!InitializeTypes())
@@ -242,6 +242,139 @@ namespace AutoKnife
             }
         }
 
+        // Cached reflection for new Input System (Mouse.current.leftButton.isPressed)
+        private static System.Reflection.PropertyInfo _mouseCurrentProp;
+        private static System.Reflection.PropertyInfo _mouseLeftButtonProp;
+        private static System.Reflection.PropertyInfo _buttonIsPressedProp;
+        private static bool _inputSystemResolved = false;
+
+        private static bool TryResolveInputSystem()
+        {
+            if (_inputSystemResolved) return _mouseCurrentProp != null;
+            _inputSystemResolved = true;
+            try
+            {
+                // Find Unity.InputSystem assembly
+                System.Reflection.Assembly inputAssembly = null;
+                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    if (asm.GetName().Name == "Unity.InputSystem")
+                    {
+                        inputAssembly = asm;
+                        break;
+                    }
+                }
+                if (inputAssembly == null)
+                {
+                    _staticLogger.LogWarning("[TAIGU] Unity.InputSystem assembly not found");
+                    return false;
+                }
+                _staticLogger.LogInfo($"[TAIGU] Found Unity.InputSystem: {inputAssembly.GetName().Version}");
+
+                // Mouse type
+                var mouseType = inputAssembly.GetType("UnityEngine.InputSystem.Mouse");
+                if (mouseType == null)
+                {
+                    _staticLogger.LogWarning("[TAIGU] Mouse type not found in InputSystem");
+                    return false;
+                }
+
+                // Mouse.current (static property)
+                _mouseCurrentProp = mouseType.GetProperty("current",
+                    BindingFlags.Public | BindingFlags.Static);
+                if (_mouseCurrentProp == null)
+                {
+                    _staticLogger.LogWarning("[TAIGU] Mouse.current property not found");
+                    return false;
+                }
+
+                // Get the actual Mouse instance to find leftButton property type
+                var mouseInstance = _mouseCurrentProp.GetValue(null);
+                if (mouseInstance == null)
+                {
+                    _staticLogger.LogWarning("[TAIGU] Mouse.current is null (not initialized yet)");
+                    return false;
+                }
+
+                // mouse.leftButton - find it on the Mouse class or its base classes
+                _mouseLeftButtonProp = mouseType.GetProperty("leftButton",
+                    BindingFlags.Public | BindingFlags.Instance);
+                if (_mouseLeftButtonProp == null)
+                {
+                    // Try base types (Mouse -> Pointer -> InputDevice)
+                    var baseType = mouseType.BaseType;
+                    while (baseType != null && _mouseLeftButtonProp == null)
+                    {
+                        _mouseLeftButtonProp = baseType.GetProperty("leftButton",
+                            BindingFlags.Public | BindingFlags.Instance);
+                        baseType = baseType.BaseType;
+                    }
+                }
+                if (_mouseLeftButtonProp == null)
+                {
+                    _staticLogger.LogWarning("[TAIGU] leftButton property not found on Mouse");
+                    return false;
+                }
+
+                // leftButton.isPressed - find on ButtonControl or its base types
+                var leftButtonInstance = _mouseLeftButtonProp.GetValue(mouseInstance);
+                if (leftButtonInstance == null)
+                {
+                    _staticLogger.LogWarning("[TAIGU] leftButton instance is null");
+                    return false;
+                }
+
+                var buttonType = leftButtonInstance.GetType();
+                _buttonIsPressedProp = buttonType.GetProperty("isPressed",
+                    BindingFlags.Public | BindingFlags.Instance);
+                if (_buttonIsPressedProp == null)
+                {
+                    // Try base types (ButtonControl -> InputControl<ButtonState>)
+                    var btnBase = buttonType.BaseType;
+                    while (btnBase != null && _buttonIsPressedProp == null)
+                    {
+                        _buttonIsPressedProp = btnBase.GetProperty("isPressed",
+                            BindingFlags.Public | BindingFlags.Instance);
+                        btnBase = btnBase.BaseType;
+                    }
+                }
+                if (_buttonIsPressedProp == null)
+                {
+                    _staticLogger.LogWarning("[TAIGU] isPressed property not found on ButtonControl");
+                    return false;
+                }
+
+                _staticLogger.LogInfo("[TAIGU] Input System reflection resolved successfully");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _staticLogger.LogWarning($"[TAIGU] Failed to resolve Input System: {ex.Message}");
+                return false;
+            }
+        }
+
+        private static bool IsLeftMousePressed()
+        {
+            try
+            {
+                if (!TryResolveInputSystem()) return false;
+
+                var mouse = _mouseCurrentProp.GetValue(null);
+                if (mouse == null) return false;
+
+                var leftButton = _mouseLeftButtonProp.GetValue(mouse);
+                if (leftButton == null) return false;
+
+                return (bool)_buttonIsPressedProp.GetValue(leftButton);
+            }
+            catch (Exception ex)
+            {
+                _staticLogger.LogWarning($"[TAIGU] IsLeftMousePressed error: {ex.Message}");
+                return false;
+            }
+        }
+
         // Manual patch methods (not using attributes)
         public static bool UpdatePrefix(object __instance)
         {
@@ -258,17 +391,9 @@ namespace AutoKnife
                     if (isDead) return true;
                 }
 
-                // Check if left mouse button is held down
-                bool mouseHeld = false;
-                try
-                {
-                    mouseHeld = Input.GetMouseButton(0);
-                }
-                catch (Exception ex)
-                {
-                    _staticLogger.LogWarning($"[TAIGU] Failed to check mouse button: {ex.Message}");
-                }
-                _staticLogger.LogDebug($"[TAIGU] GetMouseButton(0): {mouseHeld}");
+                // Check if left mouse button is held down (new Input System via reflection)
+                bool mouseHeld = IsLeftMousePressed();
+                _staticLogger.LogDebug($"[TAIGU] Mouse left button isPressed: {mouseHeld}");
                 if (!mouseHeld)
                 {
                     return true;
