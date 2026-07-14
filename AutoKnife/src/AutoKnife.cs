@@ -245,6 +245,7 @@ namespace AutoKnife
         // Manual patch methods (not using attributes)
         public static bool UpdatePrefix(object __instance)
         {
+            _staticLogger.LogDebug($"[TAIGU] UpdatePrefix called, instance: {__instance?.GetType().Name ?? "null"}");
             try
             {
                 // Check if player is dead
