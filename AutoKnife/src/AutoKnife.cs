@@ -73,9 +73,16 @@ namespace AutoKnife
                     return false;
                 }
 
-                // Get UseItemOnClient method
+                // Get UseItemOnClient method (try with different binding flags)
                 _useItemOnClientMethod = _playerControllerBType.GetMethod("UseItemOnClient",
-                    BindingFlags.Public | BindingFlags.Instance);
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (_useItemOnClientMethod == null)
+                {
+                    // Try with parameters (might take an int slot parameter)
+                    _useItemOnClientMethod = _playerControllerBType.GetMethod("UseItemOnClient",
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
+                        null, new Type[] { typeof(int) }, null);
+                }
                 if (_useItemOnClientMethod == null)
                 {
                     Logger.LogError("[TAIGU] UseItemOnClient method not found");
@@ -84,7 +91,7 @@ namespace AutoKnife
 
                 // Get currentlyHeldObjectServer field
                 _currentlyHeldObjectServerField = _playerControllerBType.GetField("currentlyHeldObjectServer",
-                    BindingFlags.Public | BindingFlags.Instance);
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 if (_currentlyHeldObjectServerField == null)
                 {
                     Logger.LogError("[TAIGU] currentlyHeldObjectServer field not found");
@@ -170,8 +177,39 @@ namespace AutoKnife
                         return true;
                     }
 
-                    // Call UseItemOnClient
-                    _useItemOnClientMethod.Invoke(__instance, null);
+                    // Call UseItemOnClient (handle both parameterless and parameterized versions)
+                    var parameters = _useItemOnClientMethod.GetParameters();
+                    if (parameters.Length == 0)
+                    {
+                        _useItemOnClientMethod.Invoke(__instance, null);
+                    }
+                    else
+                    {
+                        // Try to get the current item slot
+                        object[] args = new object[parameters.Length];
+                        for (int i = 0; i < parameters.Length; i++)
+                        {
+                            if (parameters[i].ParameterType == typeof(int))
+                            {
+                                // Try to get currentItemSlot field
+                                var currentItemSlotField = __instance.GetType().GetField("currentItemSlot",
+                                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                                if (currentItemSlotField != null)
+                                {
+                                    args[i] = currentItemSlotField.GetValue(__instance);
+                                }
+                                else
+                                {
+                                    args[i] = 0; // Default to slot 0
+                                }
+                            }
+                            else
+                            {
+                                args[i] = Type.Missing;
+                            }
+                        }
+                        _useItemOnClientMethod.Invoke(__instance, args);
+                    }
                     _timeAtLastAttack = currentTime;
 
                     return false; // Skip original Update to prevent double execution
