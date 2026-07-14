@@ -12,7 +12,7 @@ namespace AutoKnife
     {
         public const string ModGuid = "TAIGU.AutoKnife";
         public const string ModName = "AutoKnife";
-        public const string ModVersion = "1.0.10";
+        public const string ModVersion = "1.0.11";
 
         private Harmony _harmony;
         private static float _timeAtLastAttack = 0f;
@@ -178,14 +178,18 @@ namespace AutoKnife
             try
             {
                 // Patch PlayerControllerB.Update
-                var updatePrefix = new HarmonyMethod(typeof(AutoKnifePlugin), nameof(UpdatePrefix));
+                var updatePrefixMethod = typeof(AutoKnifePlugin).GetMethod("UpdatePrefix",
+                    BindingFlags.NonPublic | BindingFlags.Static);
+                var updatePrefix = new HarmonyMethod(updatePrefixMethod);
                 _harmony.Patch(_updateMethod, prefix: updatePrefix);
                 Logger.LogInfo("[TAIGU] Patched PlayerControllerB.Update");
 
                 // Patch KnifeItem.HitKnife
                 if (_hitKnifeMethod != null && _timeAtLastDamageDealtField != null)
                 {
-                    var hitKnifePostfix = new HarmonyMethod(typeof(AutoKnifePlugin), nameof(HitKnifePostfix));
+                    var hitKnifePostfixMethod = typeof(AutoKnifePlugin).GetMethod("HitKnifePostfix",
+                        BindingFlags.NonPublic | BindingFlags.Static);
+                    var hitKnifePostfix = new HarmonyMethod(hitKnifePostfixMethod);
                     _harmony.Patch(_hitKnifeMethod, postfix: hitKnifePostfix);
                     Logger.LogInfo("[TAIGU] Patched KnifeItem.HitKnife");
                 }
