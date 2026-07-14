@@ -85,7 +85,10 @@ namespace AutoKnife
                 }
                 if (_useItemOnClientMethod == null)
                 {
-                    Logger.LogError("[TAIGU] UseItemOnClient method not found");
+                    // Debug: log all methods containing "Use" or "Item"
+                    var allMethods = _playerControllerBType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    var matchingMethods = allMethods.Where(m => m.Name.Contains("Use") || m.Name.Contains("Item")).Select(m => m.Name).Distinct().ToList();
+                    Logger.LogError($"[TAIGU] UseItemOnClient method not found. Available methods: {string.Join(", ", matchingMethods)}");
                     return false;
                 }
 
