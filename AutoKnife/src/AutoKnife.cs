@@ -12,7 +12,7 @@ namespace AutoKnife
     {
         public const string ModGuid = "TAIGU.AutoKnife";
         public const string ModName = "AutoKnife";
-        public const string ModVersion = "1.0.23";
+        public const string ModVersion = "1.0.24";
 
         private Harmony _harmony;
         private static float _timeAtLastAttack = 0f;
@@ -121,7 +121,18 @@ namespace AutoKnife
                     BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 if (_useItemOnClientMethod == null)
                 {
-                    // Try with parameters
+                    // Try with bool parameter (V81 signature: UseItemOnClient(bool))
+                    _useItemOnClientMethod = _playerControllerBType.GetMethod("UseItemOnClient",
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
+                        null, new Type[] { typeof(bool) }, null);
+                    if (_useItemOnClientMethod != null)
+                    {
+                        _staticLogger.LogInfo("[TAIGU] Found UseItemOnClient(bool)");
+                    }
+                }
+                if (_useItemOnClientMethod == null)
+                {
+                    // Try with int parameter
                     _useItemOnClientMethod = _playerControllerBType.GetMethod("UseItemOnClient",
                         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
                         null, new Type[] { typeof(int) }, null);
@@ -497,6 +508,10 @@ namespace AutoKnife
                                 {
                                     args[i] = 0;
                                 }
+                            }
+                            else if (parameters[i].ParameterType == typeof(bool))
+                            {
+                                args[i] = true;
                             }
                             else
                             {
