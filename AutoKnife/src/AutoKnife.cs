@@ -259,7 +259,15 @@ namespace AutoKnife
                 }
 
                 // Check if left mouse button is held down
-                bool mouseHeld = Input.GetMouseButton(0);
+                bool mouseHeld = false;
+                try
+                {
+                    mouseHeld = Input.GetMouseButton(0);
+                }
+                catch (Exception ex)
+                {
+                    _staticLogger.LogWarning($"[TAIGU] Failed to check mouse button: {ex.Message}");
+                }
                 _staticLogger.LogDebug($"[TAIGU] GetMouseButton(0): {mouseHeld}");
                 if (!mouseHeld)
                 {
