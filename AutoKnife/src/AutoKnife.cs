@@ -12,7 +12,7 @@ namespace AutoKnife
     {
         public const string ModGuid = "TAIGU.AutoKnife";
         public const string ModName = "AutoKnife";
-        public const string ModVersion = "1.0.17";
+        public const string ModVersion = "1.0.19";
 
         private Harmony _harmony;
         private static float _timeAtLastAttack = 0f;
