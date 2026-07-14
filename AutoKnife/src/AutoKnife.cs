@@ -12,7 +12,7 @@ namespace AutoKnife
     {
         public const string ModGuid = "TAIGU.AutoKnife";
         public const string ModName = "AutoKnife";
-        public const string ModVersion = "1.0.22";
+        public const string ModVersion = "1.0.23";
 
         private Harmony _harmony;
         private static float _timeAtLastAttack = 0f;
@@ -127,6 +127,26 @@ namespace AutoKnife
                         null, new Type[] { typeof(int) }, null);
                 }
                 
+                // Log all methods containing "Use", "Item", or "Activate" for debugging
+                var allPlayerMethods = _playerControllerBType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                var relevantMethods = allPlayerMethods
+                    .Where(m => m.Name.Contains("Use") || m.Name.Contains("Item") || m.Name.Contains("Activate") || m.Name.Contains("Attack"))
+                    .Select(m => $"{m.Name}({string.Join(",", m.GetParameters().Select(p => p.ParameterType.Name))})")
+                    .Distinct()
+                    .OrderBy(m => m)
+                    .ToList();
+                _staticLogger.LogInfo($"[TAIGU] PlayerControllerB relevant methods: {string.Join(", ", relevantMethods)}");
+                
+                // Also log KnifeItem methods
+                var allKnifeMethods = _knifeItemType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                var relevantKnifeMethods = allKnifeMethods
+                    .Where(m => m.Name.Contains("Use") || m.Name.Contains("Hit") || m.Name.Contains("Attack") || m.Name.Contains("Swing"))
+                    .Select(m => $"{m.Name}({string.Join(",", m.GetParameters().Select(p => p.ParameterType.Name))})")
+                    .Distinct()
+                    .OrderBy(m => m)
+                    .ToList();
+                _staticLogger.LogInfo($"[TAIGU] KnifeItem relevant methods: {string.Join(", ", relevantKnifeMethods)}");
+                
                 // Fallback: try ActivateItem_performed
                 MethodInfo activateItemMethod = null;
                 if (_useItemOnClientMethod == null)
@@ -139,11 +159,34 @@ namespace AutoKnife
                     }
                 }
                 
+                // Try to find better methods
+                if (_useItemOnClientMethod == null)
+                {
+                    // Try ItemActivate
+                    var itemActivate = _playerControllerBType.GetMethod("ItemActivate",
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (itemActivate != null)
+                    {
+                        _staticLogger.LogInfo("[TAIGU] Found ItemActivate method");
+                        _useItemOnClientMethod = itemActivate;
+                    }
+                }
+                
+                if (_useItemOnClientMethod == null)
+                {
+                    // Try UseItem
+                    var useItem = _playerControllerBType.GetMethod("UseItem",
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (useItem != null)
+                    {
+                        _staticLogger.LogInfo("[TAIGU] Found UseItem method");
+                        _useItemOnClientMethod = useItem;
+                    }
+                }
+                
                 if (_useItemOnClientMethod == null && activateItemMethod == null)
                 {
-                    var allMethods = _playerControllerBType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    var matchingMethods = allMethods.Where(m => m.Name.Contains("Use") || m.Name.Contains("Item")).Select(m => m.Name).Distinct().ToList();
-                    _staticLogger.LogError($"[TAIGU] No suitable method found. Available methods: {string.Join(", ", matchingMethods)}");
+                    _staticLogger.LogError($"[TAIGU] No suitable method found");
                     return false;
                 }
                 
@@ -496,6 +539,35 @@ namespace AutoKnife
                     catch (Exception ex)
                     {
                         _staticLogger.LogError($"[TAIGU] ActivateItem_performed failed: {ex.InnerException?.Message ?? ex.Message}");
+                    }
+                    
+                    // Also try calling ItemActivate on the held item as additional fallback
+                    try
+                    {
+                        var grabbableObjectType = heldItem.GetType().BaseType;
+                        while (grabbableObjectType != null && grabbableObjectType.Name != "GrabbableObject")
+                        {
+                            grabbableObjectType = grabbableObjectType.BaseType;
+                        }
+                        if (grabbableObjectType != null)
+                        {
+                            var itemActivateMethod = grabbableObjectType.GetMethod("ItemActivate",
+                                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                            if (itemActivateMethod != null)
+                            {
+                                _staticLogger.LogInfo($"[TAIGU] Found ItemActivate on GrabbableObject");
+                                var itemActivateParams = itemActivateMethod.GetParameters();
+                                if (itemActivateParams.Length == 0)
+                                {
+                                    itemActivateMethod.Invoke(heldItem, null);
+                                    _staticLogger.LogInfo($"[TAIGU] Called ItemActivate() on held item");
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _staticLogger.LogWarning($"[TAIGU] ItemActivate fallback failed: {ex.InnerException?.Message ?? ex.Message}");
                     }
                 }
                 else
