@@ -12,7 +12,7 @@ namespace AutoKnife
     {
         public const string ModGuid = "TAIGU.AutoKnife";
         public const string ModName = "AutoKnife";
-        public const string ModVersion = "1.0.20";
+        public const string ModVersion = "1.0.21";
 
         private Harmony _harmony;
         private static float _timeAtLastAttack = 0f;
@@ -466,6 +466,7 @@ namespace AutoKnife
                 }
                 else if (_activateItemMethod != null)
                 {
+                    _staticLogger.LogInfo($"[TAIGU] Calling ActivateItem_performed...");
                     var parameters = _activateItemMethod.GetParameters();
                     object[] args = new object[parameters.Length];
                     for (int i = 0; i < parameters.Length; i++)
@@ -475,11 +476,25 @@ namespace AutoKnife
                     try
                     {
                         _activateItemMethod.Invoke(__instance, args);
+                        _staticLogger.LogInfo($"[TAIGU] Called ActivateItem_performed with {parameters.Length} parameters");
                     }
-                    catch
+                    catch (Exception ex)
                     {
-                        _activateItemMethod.Invoke(__instance, null);
+                        _staticLogger.LogWarning($"[TAIGU] ActivateItem_performed with args failed: {ex.InnerException?.Message ?? ex.Message}");
+                        try
+                        {
+                            _activateItemMethod.Invoke(__instance, null);
+                            _staticLogger.LogInfo("[TAIGU] Called ActivateItem_performed with null args");
+                        }
+                        catch (Exception ex2)
+                        {
+                            _staticLogger.LogError($"[TAIGU] ActivateItem_performed failed: {ex2.InnerException?.Message ?? ex2.Message}");
+                        }
                     }
+                }
+                else
+                {
+                    _staticLogger.LogError("[TAIGU] No attack method available (both UseItemOnClient and ActivateItem_performed are null)");
                 }
                 _timeAtLastAttack = currentTime;
 
