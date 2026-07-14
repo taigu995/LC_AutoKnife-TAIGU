@@ -12,7 +12,7 @@ namespace AutoKnife
     {
         public const string ModGuid = "TAIGU.AutoKnife";
         public const string ModName = "AutoKnife";
-        public const string ModVersion = "1.0.24";
+        public const string ModVersion = "1.0.25";
 
         private Harmony _harmony;
         private static float _timeAtLastAttack = 0f;
@@ -23,6 +23,7 @@ namespace AutoKnife
         private static Type _playerControllerBType;
         private static Type _knifeItemType;
         private static MethodInfo _useItemOnClientMethod;
+        private static MethodInfo _knifeUseItemOnClientMethod;
         private static MethodInfo _activateItemMethod;
         private static MethodInfo _updateMethod;
         private static MethodInfo _hitKnifeMethod;
@@ -202,6 +203,25 @@ namespace AutoKnife
                 }
                 
                 _activateItemMethod = activateItemMethod;
+
+                // Get UseItemOnClient(bool) on KnifeItem (the actual method that triggers item use)
+                _knifeUseItemOnClientMethod = _knifeItemType.GetMethod("UseItemOnClient",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
+                    null, new Type[] { typeof(bool) }, null);
+                if (_knifeUseItemOnClientMethod != null)
+                {
+                    _staticLogger.LogInfo("[TAIGU] Found KnifeItem.UseItemOnClient(bool)");
+                }
+                else
+                {
+                    // Try parameterless
+                    _knifeUseItemOnClientMethod = _knifeItemType.GetMethod("UseItemOnClient",
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (_knifeUseItemOnClientMethod != null)
+                    {
+                        _staticLogger.LogInfo("[TAIGU] Found KnifeItem.UseItemOnClient()");
+                    }
+                }
 
                 // Get currentlyHeldObjectServer field
                 _currentlyHeldObjectServerField = _playerControllerBType.GetField("currentlyHeldObjectServer",
@@ -482,8 +502,23 @@ namespace AutoKnife
 
                 _staticLogger.LogInfo("[TAIGU] Attack interval passed, triggering attack...");
 
-                // Call the appropriate method
-                if (_useItemOnClientMethod != null)
+                // Priority 1: Call UseItemOnClient on the knife item itself
+                if (_knifeUseItemOnClientMethod != null)
+                {
+                    var knifeParams = _knifeUseItemOnClientMethod.GetParameters();
+                    if (knifeParams.Length == 1 && knifeParams[0].ParameterType == typeof(bool))
+                    {
+                        _knifeUseItemOnClientMethod.Invoke(heldItem, new object[] { true });
+                        _staticLogger.LogInfo("[TAIGU] Called KnifeItem.UseItemOnClient(true)");
+                    }
+                    else if (knifeParams.Length == 0)
+                    {
+                        _knifeUseItemOnClientMethod.Invoke(heldItem, null);
+                        _staticLogger.LogInfo("[TAIGU] Called KnifeItem.UseItemOnClient()");
+                    }
+                }
+                // Priority 2: Call UseItemOnClient on PlayerControllerB
+                else if (_useItemOnClientMethod != null)
                 {
                     var parameters = _useItemOnClientMethod.GetParameters();
                     if (parameters.Length == 0)
