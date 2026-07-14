@@ -1,293 +1,206 @@
-// AutoKnife - Merged Mod for Lethal Company V81
-// Combines: Auto-attack on hold + Remove knife attack cooldown
-// Author: TAIGU
-// Version: 1.0.6
-//
-// Changelog:
-//   1.0.6 - CRITICAL FIX: Complete reflection-based approach
-//           - All Unity type references now use reflection to avoid version mismatch
-//           - Input.GetMouseButton(0) called via reflection (no compile-time UnityEngine.Input ref)
-//           - PlayerControllerB fields accessed via reflection
-//           - KnifeItem fields accessed via reflection
-//           - Zero direct type references to Unity types - eliminates all TypeLoadException risks
-//   1.0.5 - Attempted Input.GetMouseButton(0) but still had version mismatch
-//   1.0.4 - Attempted Mouse.current.leftButton.isPressed (TypeLoadException)
-//   1.0.3 - Attempted IngamePlayerSettings.Instance.playerInput (MissingMethodException)
-//   1.0.2 - Removed isLocalPlayerController (MissingFieldException)
-//   1.0.1 - Fixed HarmonyPrefix->Postfix, "Use"->"ActivateItem", removed ItemActivate patch
-
 using System;
+using System.Linq;
 using System.Reflection;
 using BepInEx;
-using BepInEx.Logging;
 using HarmonyLib;
+using UnityEngine;
 
 namespace AutoKnife
 {
-    [BepInPlugin(ModGUID, ModName, ModVersion)]
+    [BepInPlugin(ModGuid, ModName, ModVersion)]
     public class AutoKnifePlugin : BaseUnityPlugin
     {
-        private const string ModGUID = "TAIGU.AutoKnife";
-        private const string ModName = "AutoKnife";
-        private const string ModVersion = "1.0.6";
+        public const string ModGuid = "TAIGU.AutoKnife";
+        public const string ModName = "AutoKnife";
+        public const string ModVersion = "1.0.7";
 
         private Harmony _harmony;
-        internal static ManualLogSource Log;
+        private static float _timeAtLastAttack = 0f;
+        private const float AttackInterval = 0.1f;
+
+        // Cached types
+        private static Type _playerControllerBType;
+        private static Type _knifeItemType;
+        private static MethodInfo _useItemOnClientMethod;
+        private static FieldInfo _currentlyHeldObjectServerField;
+        private static FieldInfo _timeAtLastDamageDealtField;
 
         private void Awake()
         {
-            if (Instance == null)
-                Instance = this;
+            Logger.LogInfo($"[TAIGU] {ModName} v{ModVersion} loading...");
+            Logger.LogInfo($"[TAIGU] Features: Auto-attack on hold + No knife cooldown");
+            Logger.LogInfo($"[TAIGU] Input: Input.GetMouseButton(0) (direct mouse detection)");
 
-            Log = Logger;
+            // Initialize types via reflection
+            if (!InitializeTypes())
+            {
+                Logger.LogError("[TAIGU] Failed to initialize types, mod will not function");
+                return;
+            }
 
-            _harmony = new Harmony(ModGUID);
-            _harmony.PatchAll();
-
-            Log.LogInfo($"[TAIGU] {ModName} v{ModVersion} loaded successfully.");
-            Log.LogInfo("[TAIGU] Features: Auto-attack on hold + No knife cooldown");
-            Log.LogInfo("[TAIGU] Input: Reflection-based Input.GetMouseButton(0) - zero version dependency");
+            _harmony = new Harmony(ModGuid);
+            _harmony.PatchAll(typeof(AutoKnifePlugin).Assembly);
+            Logger.LogInfo($"[TAIGU] {ModName} v{ModVersion} loaded successfully.");
         }
 
-        public static AutoKnifePlugin Instance { get; private set; }
-    }
-}
-
-namespace AutoKnife.Patches
-{
-    /// <summary>
-    /// Patch 1: Auto-attack when holding left mouse button.
-    /// COMPLETELY REFLECTION-BASED - no direct Unity type references.
-    /// This eliminates all TypeLoadException risks from version mismatches.
-    /// </summary>
-    [HarmonyPatch]
-    public class PlayerControllerB_Update_Patch
-    {
-        private static float _timeAtLastAttack = 0f;
-        private const float ATTACK_INTERVAL = 0.1f;
-
-        // Reflection cache for Input.GetMouseButton
-        private static MethodInfo _getMouseButtonMethod;
-        private static bool _inputMethodResolved = false;
-
-        // Reflection cache for PlayerControllerB fields
-        private static FieldInfo _isPlayerDeadField;
-        private static FieldInfo _currentlyHeldObjectServerField;
-        private static MethodInfo _useItemOnClientMethod;
-        private static bool _playerFieldsResolved = false;
-
-        private static void ResolveInputMethod()
+        private bool InitializeTypes()
         {
-            if (_inputMethodResolved) return;
-            _inputMethodResolved = true;
-
             try
             {
-                // Get UnityEngine.Input class via reflection
-                var inputType = typeof(UnityEngine.Object).Assembly.GetType("UnityEngine.Input");
-                if (inputType != null)
+                // Get Assembly-CSharp assembly
+                Assembly assemblyCSharp = AppDomain.CurrentDomain.GetAssemblies()
+                    .FirstOrDefault(a => a.GetName().Name == "Assembly-CSharp");
+
+                if (assemblyCSharp == null)
                 {
-                    _getMouseButtonMethod = inputType.GetMethod("GetMouseButton",
-                        BindingFlags.Public | BindingFlags.Static,
-                        null, new Type[] { typeof(int) }, null);
+                    Logger.LogError("[TAIGU] Assembly-CSharp not found");
+                    return false;
                 }
-            }
-            catch (Exception ex)
-            {
-                AutoKnife.AutoKnifePlugin.Log?.LogWarning($"[TAIGU] Failed to resolve Input.GetMouseButton: {ex.Message}");
-            }
-        }
 
-        private static void ResolvePlayerFields(Type playerType)
-        {
-            if (_playerFieldsResolved) return;
-            _playerFieldsResolved = true;
+                // Get PlayerControllerB type
+                _playerControllerBType = assemblyCSharp.GetType("GameNetcodeStuff.PlayerControllerB");
+                if (_playerControllerBType == null)
+                {
+                    Logger.LogError("[TAIGU] PlayerControllerB type not found");
+                    return false;
+                }
 
-            try
-            {
-                _isPlayerDeadField = playerType.GetField("isPlayerDead",
+                // Get KnifeItem type
+                _knifeItemType = assemblyCSharp.GetType("KnifeItem");
+                if (_knifeItemType == null)
+                {
+                    Logger.LogError("[TAIGU] KnifeItem type not found");
+                    return false;
+                }
+
+                // Get UseItemOnClient method
+                _useItemOnClientMethod = _playerControllerBType.GetMethod("UseItemOnClient",
+                    BindingFlags.Public | BindingFlags.Instance);
+                if (_useItemOnClientMethod == null)
+                {
+                    Logger.LogError("[TAIGU] UseItemOnClient method not found");
+                    return false;
+                }
+
+                // Get currentlyHeldObjectServer field
+                _currentlyHeldObjectServerField = _playerControllerBType.GetField("currentlyHeldObjectServer",
+                    BindingFlags.Public | BindingFlags.Instance);
+                if (_currentlyHeldObjectServerField == null)
+                {
+                    Logger.LogError("[TAIGU] currentlyHeldObjectServer field not found");
+                    return false;
+                }
+
+                // Get timeAtLastDamageDealt field from KnifeItem
+                _timeAtLastDamageDealtField = _knifeItemType.GetField("timeAtLastDamageDealt",
                     BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-
-                _currentlyHeldObjectServerField = playerType.GetField("currentlyHeldObjectServer",
-                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-
-                _useItemOnClientMethod = playerType.GetMethod("UseItemOnClient",
-                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
-                    null, Type.EmptyTypes, null);
-            }
-            catch (Exception ex)
-            {
-                AutoKnife.AutoKnifePlugin.Log?.LogWarning($"[TAIGU] Failed to resolve PlayerControllerB fields: {ex.Message}");
-            }
-        }
-
-        private static bool IsLeftMouseHeld()
-        {
-            ResolveInputMethod();
-            if (_getMouseButtonMethod == null) return false;
-
-            try
-            {
-                return (bool)_getMouseButtonMethod.Invoke(null, new object[] { 0 });
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        [HarmonyPostfix]
-        [HarmonyPatch("GameNetcodeStuff.PlayerControllerB", "Update")]
-        private static void UpdatePostfix(object __instance)
-        {
-            try
-            {
-                if (__instance == null)
-                    return;
-
-                var playerType = __instance.GetType();
-                ResolvePlayerFields(playerType);
-
-                // Safety: don't auto-attack if player is dead
-                if (_isPlayerDeadField != null)
+                if (_timeAtLastDamageDealtField == null)
                 {
-                    try
+                    // Try alternative field names
+                    Logger.LogWarning("[TAIGU] timeAtLastDamageDealt field not found, trying alternatives...");
+                    foreach (var field in _knifeItemType.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
                     {
-                        if ((bool)_isPlayerDeadField.GetValue(__instance))
-                            return;
-                    }
-                    catch { }
-                }
-
-                // Check if the player is holding a KnifeItem
-                object heldItem = null;
-                if (_currentlyHeldObjectServerField != null)
-                {
-                    try { heldItem = _currentlyHeldObjectServerField.GetValue(__instance); }
-                    catch { }
-                }
-
-                if (heldItem == null) return;
-
-                // Check if held item is KnifeItem by type name
-                if (heldItem.GetType().Name != "KnifeItem") return;
-
-                // Check if left mouse button is held (via reflection)
-                if (!IsLeftMouseHeld())
-                    return;
-
-                // Rate-limit the auto-attack
-                float currentTime = UnityEngine.Time.realtimeSinceStartup;
-                if (currentTime - _timeAtLastAttack < ATTACK_INTERVAL)
-                    return;
-
-                _timeAtLastAttack = currentTime;
-
-                // Trigger the knife attack via reflection
-                if (_useItemOnClientMethod != null)
-                {
-                    try { _useItemOnClientMethod.Invoke(__instance, null); }
-                    catch (Exception ex)
-                    {
-                        AutoKnife.AutoKnifePlugin.Log?.LogWarning($"[TAIGU] UseItemOnClient failed: {ex.Message}");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                AutoKnife.AutoKnifePlugin.Log?.LogError($"[TAIGU] Auto-attack patch error: {ex.Message}");
-            }
-        }
-    }
-
-    /// <summary>
-    /// Patch 2: Remove knife attack cooldown.
-    /// COMPLETELY REFLECTION-BASED - no direct Unity type references.
-    /// After HitKnife is called, resets the timeAtLastDamageDealt field to -1.
-    /// Based on FastKnife by nexor.
-    /// </summary>
-    [HarmonyPatch]
-    public class KnifeItem_HitKnife_Patch
-    {
-        private static FieldInfo _timeAtLastDamageDealtField;
-        private static bool _fieldSearchDone = false;
-
-        private static void ResolveCooldownField(Type knifeType)
-        {
-            if (_fieldSearchDone) return;
-            _fieldSearchDone = true;
-
-            try
-            {
-                // Try exact field name first (from original FastKnife mod)
-                _timeAtLastDamageDealtField = knifeType.GetField("timeAtLastDamageDealt",
-                    BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-
-                if (_timeAtLastDamageDealtField != null)
-                {
-                    AutoKnife.AutoKnifePlugin.Log?.LogInfo("[TAIGU] Cooldown field resolved: timeAtLastDamageDealt");
-                    return;
-                }
-
-                // Fallback: try alternative field names for V81 compatibility
-                string[] fallbackNames = { "timeAtLastHit", "lastAttackTime", "attackCooldown", "timeSinceLastAttack" };
-                foreach (string name in fallbackNames)
-                {
-                    _timeAtLastDamageDealtField = knifeType.GetField(name,
-                        BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-                    if (_timeAtLastDamageDealtField != null)
-                    {
-                        AutoKnife.AutoKnifePlugin.Log?.LogInfo($"[TAIGU] Cooldown field resolved (fallback): {name}");
-                        return;
-                    }
-                }
-
-                // Last resort: search all float fields for time/damage/cooldown keywords
-                foreach (var field in knifeType.GetFields(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public))
-                {
-                    if (field.FieldType == typeof(float))
-                    {
-                        string lowerName = field.Name.ToLower();
-                        if (lowerName.Contains("time") || lowerName.Contains("damage") || lowerName.Contains("cooldown"))
+                        string fieldName = field.Name.ToLower();
+                        if (fieldName.Contains("time") && (fieldName.Contains("damage") || fieldName.Contains("attack") || fieldName.Contains("hit")))
                         {
                             _timeAtLastDamageDealtField = field;
-                            AutoKnife.AutoKnifePlugin.Log?.LogInfo($"[TAIGU] Cooldown field resolved (search): {field.Name}");
-                            return;
+                            Logger.LogInfo($"[TAIGU] Found alternative field: {field.Name}");
+                            break;
                         }
                     }
                 }
 
-                AutoKnife.AutoKnifePlugin.Log?.LogWarning("[TAIGU] WARNING: Could not find cooldown field on KnifeItem");
+                if (_timeAtLastDamageDealtField != null)
+                {
+                    Logger.LogInfo($"[TAIGU] Cooldown field resolved: {_timeAtLastDamageDealtField.Name}");
+                }
+                else
+                {
+                    Logger.LogWarning("[TAIGU] No cooldown field found, cooldown removal disabled");
+                }
+
+                return true;
             }
             catch (Exception ex)
             {
-                AutoKnife.AutoKnifePlugin.Log?.LogError($"[TAIGU] Failed to resolve cooldown field: {ex.Message}");
+                Logger.LogError($"[TAIGU] Type initialization failed: {ex.Message}");
+                return false;
             }
         }
 
-        [HarmonyPostfix]
-        [HarmonyPatch("KnifeItem", "HitKnife")]
-        private static void HitKnifePostfix(object __instance)
+        // Patch PlayerControllerB.Update
+        [HarmonyPatch]
+        public static class PlayerControllerB_Update_Patch
         {
-            try
+            public static bool Prefix(object __instance)
             {
-                if (__instance == null) return;
-
-                var knifeType = __instance.GetType();
-                ResolveCooldownField(knifeType);
-
-                if (_timeAtLastDamageDealtField == null)
+                try
                 {
-                    AutoKnife.AutoKnifePlugin.Log?.LogError("[TAIGU] ERROR: timeAtLastDamageDealt field not found on KnifeItem!");
-                    return;
-                }
+                    // Check if player is dead
+                    var isPlayerDeadField = __instance.GetType().GetField("isPlayerDead",
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (isPlayerDeadField != null)
+                    {
+                        bool isDead = (bool)isPlayerDeadField.GetValue(__instance);
+                        if (isDead) return true;
+                    }
 
-                // Set cooldown to -1 to effectively remove it
-                _timeAtLastDamageDealtField.SetValue(__instance, -1f);
+                    // Check if left mouse button is held down
+                    if (!Input.GetMouseButton(0))
+                    {
+                        return true;
+                    }
+
+                    // Check if holding a knife
+                    object heldItem = _currentlyHeldObjectServerField.GetValue(__instance);
+                    if (heldItem == null)
+                    {
+                        return true;
+                    }
+
+                    if (!_knifeItemType.IsInstanceOfType(heldItem))
+                    {
+                        return true;
+                    }
+
+                    // Check attack interval
+                    float currentTime = Time.realtimeSinceStartup;
+                    if (currentTime - _timeAtLastAttack < AttackInterval)
+                    {
+                        return true;
+                    }
+
+                    // Call UseItemOnClient
+                    _useItemOnClientMethod.Invoke(__instance, null);
+                    _timeAtLastAttack = currentTime;
+
+                    return false; // Skip original Update to prevent double execution
+                }
+                catch (Exception ex)
+                {
+                    // Silently fail to avoid breaking the game
+                    return true;
+                }
             }
-            catch (Exception ex)
+        }
+
+        // Patch KnifeItem.HitKnife to remove cooldown
+        [HarmonyPatch]
+        public static class KnifeItem_HitKnife_Patch
+        {
+            public static void Postfix(object __instance)
             {
-                AutoKnife.AutoKnifePlugin.Log?.LogError($"[TAIGU] HitKnife patch error: {ex.Message}");
+                try
+                {
+                    if (_timeAtLastDamageDealtField != null)
+                    {
+                        _timeAtLastDamageDealtField.SetValue(__instance, -1f);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Silently fail
+                }
             }
         }
     }
