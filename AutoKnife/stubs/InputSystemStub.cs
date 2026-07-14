@@ -17,4 +17,30 @@ namespace UnityEngine.InputSystem
     {
         public InputActionAsset actions { get; set; } = new InputActionAsset();
     }
+
+    public class InputControl
+    {
+    }
+
+    public class ButtonControl : InputControl
+    {
+        public bool isPressed => false;
+        public bool wasPressedThisFrame => false;
+    }
+
+    public class InputDevice : InputControl
+    {
+    }
+
+    public class Mouse : InputDevice
+    {
+        public static Mouse current { get; } = new Mouse();
+        public ButtonControl leftButton { get; } = new ButtonControl();
+        public ButtonControl rightButton { get; } = new ButtonControl();
+    }
+
+    public class Keyboard : InputDevice
+    {
+        public static Keyboard current { get; } = new Keyboard();
+    }
 }
