@@ -14,7 +14,7 @@ namespace HarmonyLib
         public Harmony(string id) { }
         public void PatchAll() { }
         public void PatchAll(System.Reflection.Assembly assembly) { }
-        public void Patch(System.Reflection.MethodInfo original, HarmonyMethod prefix = null, HarmonyMethod postfix = null, HarmonyMethod transpiler = null) { }
+        public System.Reflection.MethodInfo Patch(System.Reflection.MethodInfo original, HarmonyMethod prefix = null, HarmonyMethod postfix = null, HarmonyMethod transpiler = null, HarmonyMethod finalizer = null) { return null; }
     }
 
     [System.AttributeUsage(System.AttributeTargets.Class | System.AttributeTargets.Method, AllowMultiple = true)]
