@@ -12,7 +12,7 @@ namespace AutoKnife
     {
         public const string ModGuid = "TAIGU.AutoKnife";
         public const string ModName = "AutoKnife";
-        public const string ModVersion = "1.0.25";
+        public const string ModVersion = "1.0.26";
 
         private Harmony _harmony;
         private static float _timeAtLastAttack = 0f;
@@ -139,61 +139,12 @@ namespace AutoKnife
                         null, new Type[] { typeof(int) }, null);
                 }
                 
-                // Log all methods containing "Use", "Item", or "Activate" for debugging
-                var allPlayerMethods = _playerControllerBType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                var relevantMethods = allPlayerMethods
-                    .Where(m => m.Name.Contains("Use") || m.Name.Contains("Item") || m.Name.Contains("Activate") || m.Name.Contains("Attack"))
-                    .Select(m => $"{m.Name}({string.Join(",", m.GetParameters().Select(p => p.ParameterType.Name))})")
-                    .Distinct()
-                    .OrderBy(m => m)
-                    .ToList();
-                _staticLogger.LogInfo($"[TAIGU] PlayerControllerB relevant methods: {string.Join(", ", relevantMethods)}");
-                
-                // Also log KnifeItem methods
-                var allKnifeMethods = _knifeItemType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                var relevantKnifeMethods = allKnifeMethods
-                    .Where(m => m.Name.Contains("Use") || m.Name.Contains("Hit") || m.Name.Contains("Attack") || m.Name.Contains("Swing"))
-                    .Select(m => $"{m.Name}({string.Join(",", m.GetParameters().Select(p => p.ParameterType.Name))})")
-                    .Distinct()
-                    .OrderBy(m => m)
-                    .ToList();
-                _staticLogger.LogInfo($"[TAIGU] KnifeItem relevant methods: {string.Join(", ", relevantKnifeMethods)}");
-                
                 // Fallback: try ActivateItem_performed
                 MethodInfo activateItemMethod = null;
                 if (_useItemOnClientMethod == null)
                 {
                     activateItemMethod = _playerControllerBType.GetMethod("ActivateItem_performed",
                         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    if (activateItemMethod != null)
-                    {
-                        _staticLogger.LogInfo("[TAIGU] Using ActivateItem_performed as fallback");
-                    }
-                }
-                
-                // Try to find better methods
-                if (_useItemOnClientMethod == null)
-                {
-                    // Try ItemActivate
-                    var itemActivate = _playerControllerBType.GetMethod("ItemActivate",
-                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    if (itemActivate != null)
-                    {
-                        _staticLogger.LogInfo("[TAIGU] Found ItemActivate method");
-                        _useItemOnClientMethod = itemActivate;
-                    }
-                }
-                
-                if (_useItemOnClientMethod == null)
-                {
-                    // Try UseItem
-                    var useItem = _playerControllerBType.GetMethod("UseItem",
-                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    if (useItem != null)
-                    {
-                        _staticLogger.LogInfo("[TAIGU] Found UseItem method");
-                        _useItemOnClientMethod = useItem;
-                    }
                 }
                 
                 if (_useItemOnClientMethod == null && activateItemMethod == null)
@@ -343,7 +294,7 @@ namespace AutoKnife
                     _staticLogger.LogWarning("[TAIGU] Unity.InputSystem assembly not found");
                     return false;
                 }
-                _staticLogger.LogInfo($"[TAIGU] Found Unity.InputSystem: {inputAssembly.GetName().Version}");
+                _staticLogger.LogInfo($"[TAIGU] Found Unity.InputSystem {inputAssembly.GetName().Version}");
 
                 // Mouse type
                 var mouseType = inputAssembly.GetType("UnityEngine.InputSystem.Mouse");
@@ -418,7 +369,6 @@ namespace AutoKnife
                     return false;
                 }
 
-                _staticLogger.LogInfo("[TAIGU] Input System reflection resolved successfully");
                 return true;
             }
             catch (Exception ex)
@@ -452,7 +402,6 @@ namespace AutoKnife
         // Manual patch methods (not using attributes)
         public static bool UpdatePrefix(object __instance)
         {
-            _staticLogger.LogDebug($"[TAIGU] UpdatePrefix called, instance: {__instance?.GetType().Name ?? "null"}");
             try
             {
                 // Check if player is dead
@@ -461,37 +410,20 @@ namespace AutoKnife
                 if (isPlayerDeadField != null)
                 {
                     bool isDead = (bool)isPlayerDeadField.GetValue(__instance);
-                    _staticLogger.LogDebug($"[TAIGU] isPlayerDead: {isDead}");
                     if (isDead) return true;
                 }
 
                 // Check if left mouse button is held down (new Input System via reflection)
                 bool mouseHeld = IsLeftMousePressed();
-                _staticLogger.LogDebug($"[TAIGU] Mouse left button isPressed: {mouseHeld}");
                 if (!mouseHeld)
                 {
                     return true;
                 }
 
-                _staticLogger.LogInfo("[TAIGU] Left mouse button held, checking held item...");
-
                 // Check if holding a knife
                 object heldItem = _currentlyHeldObjectServerField.GetValue(__instance);
-                if (heldItem == null)
-                {
-                    _staticLogger.LogInfo("[TAIGU] No item held");
-                    return true;
-                }
-
-                _staticLogger.LogInfo($"[TAIGU] Held item type: {heldItem.GetType().Name}");
-
-                if (!_knifeItemType.IsInstanceOfType(heldItem))
-                {
-                    _staticLogger.LogInfo("[TAIGU] Held item is not a knife");
-                    return true;
-                }
-
-                _staticLogger.LogInfo("[TAIGU] Holding knife, checking attack interval...");
+                if (heldItem == null) return true;
+                if (!_knifeItemType.IsInstanceOfType(heldItem)) return true;
 
                 // Check attack interval
                 float currentTime = Time.realtimeSinceStartup;
@@ -500,8 +432,6 @@ namespace AutoKnife
                     return true;
                 }
 
-                _staticLogger.LogInfo("[TAIGU] Attack interval passed, triggering attack...");
-
                 // Priority 1: Call UseItemOnClient on the knife item itself
                 if (_knifeUseItemOnClientMethod != null)
                 {
@@ -509,12 +439,10 @@ namespace AutoKnife
                     if (knifeParams.Length == 1 && knifeParams[0].ParameterType == typeof(bool))
                     {
                         _knifeUseItemOnClientMethod.Invoke(heldItem, new object[] { true });
-                        _staticLogger.LogInfo("[TAIGU] Called KnifeItem.UseItemOnClient(true)");
                     }
                     else if (knifeParams.Length == 0)
                     {
                         _knifeUseItemOnClientMethod.Invoke(heldItem, null);
-                        _staticLogger.LogInfo("[TAIGU] Called KnifeItem.UseItemOnClient()");
                     }
                 }
                 // Priority 2: Call UseItemOnClient on PlayerControllerB
@@ -524,7 +452,6 @@ namespace AutoKnife
                     if (parameters.Length == 0)
                     {
                         _useItemOnClientMethod.Invoke(__instance, null);
-                        _staticLogger.LogInfo("[TAIGU] Called UseItemOnClient()");
                     }
                     else
                     {
@@ -554,23 +481,15 @@ namespace AutoKnife
                             }
                         }
                         _useItemOnClientMethod.Invoke(__instance, args);
-                        _staticLogger.LogInfo($"[TAIGU] Called UseItemOnClient with {parameters.Length} parameters");
                     }
                 }
                 else if (_activateItemMethod != null)
                 {
-                    _staticLogger.LogInfo($"[TAIGU] Calling ActivateItem_performed...");
                     var parameters = _activateItemMethod.GetParameters();
-                    _staticLogger.LogInfo($"[TAIGU] ActivateItem_performed has {parameters.Length} parameters");
-                    
-                    // Build proper arguments based on parameter types
                     object[] args = new object[parameters.Length];
                     for (int i = 0; i < parameters.Length; i++)
                     {
                         var paramType = parameters[i].ParameterType;
-                        _staticLogger.LogInfo($"[TAIGU] Parameter {i}: {paramType.Name}");
-                        
-                        // For struct types (like InputAction.CallbackContext), create default instance
                         if (paramType.IsValueType)
                         {
                             args[i] = System.Activator.CreateInstance(paramType);
@@ -580,49 +499,14 @@ namespace AutoKnife
                             args[i] = null;
                         }
                     }
-                    
                     try
                     {
                         _activateItemMethod.Invoke(__instance, args);
-                        _staticLogger.LogInfo($"[TAIGU] Called ActivateItem_performed successfully");
                     }
                     catch (Exception ex)
                     {
                         _staticLogger.LogError($"[TAIGU] ActivateItem_performed failed: {ex.InnerException?.Message ?? ex.Message}");
                     }
-                    
-                    // Also try calling ItemActivate on the held item as additional fallback
-                    try
-                    {
-                        var grabbableObjectType = heldItem.GetType().BaseType;
-                        while (grabbableObjectType != null && grabbableObjectType.Name != "GrabbableObject")
-                        {
-                            grabbableObjectType = grabbableObjectType.BaseType;
-                        }
-                        if (grabbableObjectType != null)
-                        {
-                            var itemActivateMethod = grabbableObjectType.GetMethod("ItemActivate",
-                                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                            if (itemActivateMethod != null)
-                            {
-                                _staticLogger.LogInfo($"[TAIGU] Found ItemActivate on GrabbableObject");
-                                var itemActivateParams = itemActivateMethod.GetParameters();
-                                if (itemActivateParams.Length == 0)
-                                {
-                                    itemActivateMethod.Invoke(heldItem, null);
-                                    _staticLogger.LogInfo($"[TAIGU] Called ItemActivate() on held item");
-                                }
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _staticLogger.LogWarning($"[TAIGU] ItemActivate fallback failed: {ex.InnerException?.Message ?? ex.Message}");
-                    }
-                }
-                else
-                {
-                    _staticLogger.LogError("[TAIGU] No attack method available (both UseItemOnClient and ActivateItem_performed are null)");
                 }
                 _timeAtLastAttack = currentTime;
 
