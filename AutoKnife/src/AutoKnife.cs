@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Reflection;
 using BepInEx;
+using BepInEx.Configuration;
 using HarmonyLib;
 using UnityEngine;
 
@@ -12,12 +13,13 @@ namespace AutoKnife
     {
         public const string ModGuid = "TAIGU.AutoKnife";
         public const string ModName = "AutoKnife";
-        public const string ModVersion = "1.0.26";
+        public const string ModVersion = "1.0.27";
 
         private Harmony _harmony;
         private static float _timeAtLastAttack = 0f;
-        private const float AttackInterval = 0.02f;
+        private static float _attackInterval = 0.02f;
         private static BepInEx.Logging.ManualLogSource _staticLogger;
+        private ConfigEntry<float> _configAttackInterval;
 
         // Cached types
         private static Type _playerControllerBType;
@@ -33,9 +35,18 @@ namespace AutoKnife
         private void Awake()
         {
             _staticLogger = Logger;
+
+            // Configuration
+            _configAttackInterval = Config.Bind<float>(
+                "General",
+                "AttackInterval",
+                0.02f,
+                "Attack interval in seconds (lower = faster). Default: 0.02");
+            _attackInterval = _configAttackInterval.Value;
+            _configAttackInterval.SettingChanged += (s, e) => { _attackInterval = _configAttackInterval.Value; };
+
             _staticLogger.LogInfo($"[TAIGU] {ModName} v{ModVersion} loading...");
-            _staticLogger.LogInfo($"[TAIGU] Features: Auto-attack on hold + No knife cooldown");
-            _staticLogger.LogInfo($"[TAIGU] Input: Mouse.current.leftButton.isPressed (new Input System via reflection)");
+            _staticLogger.LogInfo($"[TAIGU] Attack interval: {_attackInterval}s");
 
             // Initialize types via reflection
             if (!InitializeTypes())
@@ -427,7 +438,7 @@ namespace AutoKnife
 
                 // Check attack interval
                 float currentTime = Time.realtimeSinceStartup;
-                if (currentTime - _timeAtLastAttack < AttackInterval)
+                if (currentTime - _timeAtLastAttack < _attackInterval)
                 {
                     return true;
                 }
