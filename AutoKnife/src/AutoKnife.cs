@@ -12,11 +12,12 @@ namespace AutoKnife
     {
         public const string ModGuid = "TAIGU.AutoKnife";
         public const string ModName = "AutoKnife";
-        public const string ModVersion = "1.0.12";
+        public const string ModVersion = "1.0.17";
 
         private Harmony _harmony;
         private static float _timeAtLastAttack = 0f;
         private const float AttackInterval = 0.1f;
+        private static BepInEx.Logging.ManualLogSource _staticLogger;
 
         // Cached types
         private static Type _playerControllerBType;
@@ -30,21 +31,22 @@ namespace AutoKnife
 
         private void Awake()
         {
-            Logger.LogInfo($"[TAIGU] {ModName} v{ModVersion} loading...");
-            Logger.LogInfo($"[TAIGU] Features: Auto-attack on hold + No knife cooldown");
-            Logger.LogInfo($"[TAIGU] Input: Input.GetMouseButton(0) (direct mouse detection)");
+            _staticLogger = Logger;
+            _staticLogger.LogInfo($"[TAIGU] {ModName} v{ModVersion} loading...");
+            _staticLogger.LogInfo($"[TAIGU] Features: Auto-attack on hold + No knife cooldown");
+            _staticLogger.LogInfo($"[TAIGU] Input: Input.GetMouseButton(0) (direct mouse detection)");
 
             // Initialize types via reflection
             if (!InitializeTypes())
             {
-                Logger.LogError("[TAIGU] Failed to initialize types, mod will not function");
+                _staticLogger.LogError("[TAIGU] Failed to initialize types, mod will not function");
                 return;
             }
 
             // Manual patching with runtime-resolved types
             _harmony = new Harmony(ModGuid);
             ApplyPatches();
-            Logger.LogInfo($"[TAIGU] {ModName} v{ModVersion} loaded successfully.");
+            _staticLogger.LogInfo($"[TAIGU] {ModName} v{ModVersion} loaded successfully.");
         }
 
         private bool InitializeTypes()
@@ -57,7 +59,7 @@ namespace AutoKnife
 
                 if (assemblyCSharp == null)
                 {
-                    Logger.LogError("[TAIGU] Assembly-CSharp not found");
+                    _staticLogger.LogError("[TAIGU] Assembly-CSharp not found");
                     return false;
                 }
 
@@ -65,7 +67,7 @@ namespace AutoKnife
                 _playerControllerBType = assemblyCSharp.GetType("GameNetcodeStuff.PlayerControllerB");
                 if (_playerControllerBType == null)
                 {
-                    Logger.LogError("[TAIGU] PlayerControllerB type not found");
+                    _staticLogger.LogError("[TAIGU] PlayerControllerB type not found");
                     return false;
                 }
 
@@ -73,7 +75,7 @@ namespace AutoKnife
                 _knifeItemType = assemblyCSharp.GetType("KnifeItem");
                 if (_knifeItemType == null)
                 {
-                    Logger.LogError("[TAIGU] KnifeItem type not found");
+                    _staticLogger.LogError("[TAIGU] KnifeItem type not found");
                     return false;
                 }
 
@@ -82,10 +84,10 @@ namespace AutoKnife
                     BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 if (_updateMethod == null)
                 {
-                    Logger.LogWarning("[TAIGU] Update method not found, listing available methods...");
+                    _staticLogger.LogWarning("[TAIGU] Update method not found, listing available methods...");
                     var allMethods = _playerControllerBType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                     var methodNames = allMethods.Select(m => m.Name).Distinct().OrderBy(n => n).ToList();
-                    Logger.LogWarning($"[TAIGU] Available methods in PlayerControllerB: {string.Join(", ", methodNames)}");
+                    _staticLogger.LogWarning($"[TAIGU] Available methods in PlayerControllerB: {string.Join(", ", methodNames)}");
                     
                     // Try to find an alternative method to patch
                     // Look for methods that are called frequently (like LateUpdate, FixedUpdate, etc.)
@@ -99,10 +101,10 @@ namespace AutoKnife
                     
                     if (_updateMethod == null)
                     {
-                        Logger.LogError("[TAIGU] No suitable update method found");
+                        _staticLogger.LogError("[TAIGU] No suitable update method found");
                         return false;
                     }
-                    Logger.LogInfo($"[TAIGU] Using {_updateMethod.Name} as alternative to Update");
+                    _staticLogger.LogInfo($"[TAIGU] Using {_updateMethod.Name} as alternative to Update");
                 }
 
                 // Get HitKnife method
@@ -110,7 +112,7 @@ namespace AutoKnife
                     BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 if (_hitKnifeMethod == null)
                 {
-                    Logger.LogError("[TAIGU] HitKnife method not found");
+                    _staticLogger.LogError("[TAIGU] HitKnife method not found");
                     return false;
                 }
 
@@ -133,7 +135,7 @@ namespace AutoKnife
                         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                     if (activateItemMethod != null)
                     {
-                        Logger.LogInfo("[TAIGU] Using ActivateItem_performed as fallback");
+                        _staticLogger.LogInfo("[TAIGU] Using ActivateItem_performed as fallback");
                     }
                 }
                 
@@ -141,7 +143,7 @@ namespace AutoKnife
                 {
                     var allMethods = _playerControllerBType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                     var matchingMethods = allMethods.Where(m => m.Name.Contains("Use") || m.Name.Contains("Item")).Select(m => m.Name).Distinct().ToList();
-                    Logger.LogError($"[TAIGU] No suitable method found. Available methods: {string.Join(", ", matchingMethods)}");
+                    _staticLogger.LogError($"[TAIGU] No suitable method found. Available methods: {string.Join(", ", matchingMethods)}");
                     return false;
                 }
                 
@@ -152,7 +154,7 @@ namespace AutoKnife
                     BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 if (_currentlyHeldObjectServerField == null)
                 {
-                    Logger.LogError("[TAIGU] currentlyHeldObjectServer field not found");
+                    _staticLogger.LogError("[TAIGU] currentlyHeldObjectServer field not found");
                     return false;
                 }
 
@@ -161,14 +163,14 @@ namespace AutoKnife
                     BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 if (_timeAtLastDamageDealtField == null)
                 {
-                    Logger.LogWarning("[TAIGU] timeAtLastDamageDealt field not found, trying alternatives...");
+                    _staticLogger.LogWarning("[TAIGU] timeAtLastDamageDealt field not found, trying alternatives...");
                     foreach (var field in _knifeItemType.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
                     {
                         string fieldName = field.Name.ToLower();
                         if (fieldName.Contains("time") && (fieldName.Contains("damage") || fieldName.Contains("attack") || fieldName.Contains("hit")))
                         {
                             _timeAtLastDamageDealtField = field;
-                            Logger.LogInfo($"[TAIGU] Found alternative field: {field.Name}");
+                            _staticLogger.LogInfo($"[TAIGU] Found alternative field: {field.Name}");
                             break;
                         }
                     }
@@ -176,18 +178,18 @@ namespace AutoKnife
 
                 if (_timeAtLastDamageDealtField != null)
                 {
-                    Logger.LogInfo($"[TAIGU] Cooldown field resolved: {_timeAtLastDamageDealtField.Name}");
+                    _staticLogger.LogInfo($"[TAIGU] Cooldown field resolved: {_timeAtLastDamageDealtField.Name}");
                 }
                 else
                 {
-                    Logger.LogWarning("[TAIGU] No cooldown field found, cooldown removal disabled");
+                    _staticLogger.LogWarning("[TAIGU] No cooldown field found, cooldown removal disabled");
                 }
 
                 return true;
             }
             catch (Exception ex)
             {
-                Logger.LogError($"[TAIGU] Type initialization failed: {ex.Message}");
+                _staticLogger.LogError($"[TAIGU] Type initialization failed: {ex.Message}");
                 return false;
             }
         }
@@ -205,16 +207,16 @@ namespace AutoKnife
                     {
                         var updatePrefix = new HarmonyMethod(updatePrefixMethod);
                         _harmony.Patch(_updateMethod, prefix: updatePrefix);
-                        Logger.LogInfo($"[TAIGU] Patched PlayerControllerB.{_updateMethod.Name}");
+                        _staticLogger.LogInfo($"[TAIGU] Patched PlayerControllerB.{_updateMethod.Name}");
                     }
                     else
                     {
-                        Logger.LogError("[TAIGU] UpdatePrefix method not found");
+                        _staticLogger.LogError("[TAIGU] UpdatePrefix method not found");
                     }
                 }
                 else
                 {
-                    Logger.LogError("[TAIGU] Update method not found, auto-attack disabled");
+                    _staticLogger.LogError("[TAIGU] Update method not found, auto-attack disabled");
                 }
 
                 // Patch KnifeItem.HitKnife
@@ -226,17 +228,17 @@ namespace AutoKnife
                     {
                         var hitKnifePostfix = new HarmonyMethod(hitKnifePostfixMethod);
                         _harmony.Patch(_hitKnifeMethod, postfix: hitKnifePostfix);
-                        Logger.LogInfo("[TAIGU] Patched KnifeItem.HitKnife");
+                        _staticLogger.LogInfo("[TAIGU] Patched KnifeItem.HitKnife");
                     }
                     else
                     {
-                        Logger.LogError("[TAIGU] HitKnifePostfix method not found");
+                        _staticLogger.LogError("[TAIGU] HitKnifePostfix method not found");
                     }
                 }
             }
             catch (Exception ex)
             {
-                Logger.LogError($"[TAIGU] Failed to apply patches: {ex.Message}");
+                _staticLogger.LogError($"[TAIGU] Failed to apply patches: {ex.Message}");
             }
         }
 
@@ -255,22 +257,31 @@ namespace AutoKnife
                 }
 
                 // Check if left mouse button is held down
-                if (!Input.GetMouseButton(0))
+                bool mouseHeld = Input.GetMouseButton(0);
+                if (!mouseHeld)
                 {
                     return true;
                 }
+
+                _staticLogger.LogInfo("[TAIGU] Left mouse button held, checking held item...");
 
                 // Check if holding a knife
                 object heldItem = _currentlyHeldObjectServerField.GetValue(__instance);
                 if (heldItem == null)
                 {
+                    _staticLogger.LogInfo("[TAIGU] No item held");
                     return true;
                 }
 
+                _staticLogger.LogInfo($"[TAIGU] Held item type: {heldItem.GetType().Name}");
+
                 if (!_knifeItemType.IsInstanceOfType(heldItem))
                 {
+                    _staticLogger.LogInfo("[TAIGU] Held item is not a knife");
                     return true;
                 }
+
+                _staticLogger.LogInfo("[TAIGU] Holding knife, checking attack interval...");
 
                 // Check attack interval
                 float currentTime = Time.realtimeSinceStartup;
@@ -279,6 +290,8 @@ namespace AutoKnife
                     return true;
                 }
 
+                _staticLogger.LogInfo("[TAIGU] Attack interval passed, triggering attack...");
+
                 // Call the appropriate method
                 if (_useItemOnClientMethod != null)
                 {
@@ -286,6 +299,7 @@ namespace AutoKnife
                     if (parameters.Length == 0)
                     {
                         _useItemOnClientMethod.Invoke(__instance, null);
+                        _staticLogger.LogInfo("[TAIGU] Called UseItemOnClient()");
                     }
                     else
                     {
@@ -311,6 +325,7 @@ namespace AutoKnife
                             }
                         }
                         _useItemOnClientMethod.Invoke(__instance, args);
+                        _staticLogger.LogInfo($"[TAIGU] Called UseItemOnClient with {parameters.Length} parameters");
                     }
                 }
                 else if (_activateItemMethod != null)
