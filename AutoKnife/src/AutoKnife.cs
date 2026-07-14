@@ -39,7 +39,7 @@ namespace AutoKnife
     {
         private const string ModGUID = "TAIGU.AutoKnife";
         private const string ModName = "AutoKnife";
-        private const string ModVersion = "1.0.2";
+        private const string ModVersion = "1.0.3";
 
         private Harmony _harmony;
         internal static ManualLogSource Log;
@@ -117,20 +117,30 @@ namespace AutoKnife.Patches
                 if (heldItem == null || !(heldItem is KnifeItem))
                     return;
 
-                // FIX v1.0.1: Use correct action name "ActivateItem" (matching original mod)
-                // with fallback to "Use" for compatibility
+                // FIX v1.0.3: Use IngamePlayerSettings.Instance.playerInput
+                // instead of __instance.playerInput (which doesn't exist in V81)
+                // This matches the original AutoKnifeAttack mod's approach.
                 if (!_actionSearchDone)
                 {
                     _actionSearchDone = true;
 
-                    if (__instance.playerInput != null && __instance.playerInput.actions != null)
+                    try
                     {
-                        // Primary: "ActivateItem" (matches original AutoKnifeAttack mod)
-                        _cachedUseAction = __instance.playerInput.actions.FindAction("ActivateItem");
+                        PlayerInput playerInput = IngamePlayerSettings.Instance.playerInput;
+                        if (playerInput != null && playerInput.actions != null)
+                        {
+                            // Primary: "ActivateItem" (matches original AutoKnifeAttack mod)
+                            _cachedUseAction = playerInput.actions.FindAction("ActivateItem");
 
-                        // Fallback: "Use" (alternative action name)
-                        if (_cachedUseAction == null)
-                            _cachedUseAction = __instance.playerInput.actions.FindAction("Use");
+                            // Fallback: "Use" (alternative action name)
+                            if (_cachedUseAction == null)
+                                _cachedUseAction = playerInput.actions.FindAction("Use");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        AutoKnife.AutoKnifePlugin.Log?.LogError(
+                            $"[TAIGU] Failed to get input actions: {ex.Message}");
                     }
                 }
 

@@ -4,7 +4,8 @@ namespace GameNetcodeStuff
     public class PlayerControllerB : UnityEngine.MonoBehaviour
     {
         public GrabbableObject currentlyHeldObjectServer;
-        public UnityEngine.InputSystem.PlayerInput playerInput;
+        // FIX v1.0.3: playerInput field removed - doesn't exist in V81
+        // Input is accessed via IngamePlayerSettings.Instance.playerInput instead
         public bool isPlayerDead;
 
         public void UseItemOnClient() { }
