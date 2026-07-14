@@ -200,7 +200,7 @@ namespace AutoKnife
                 if (_updateMethod != null)
                 {
                     var updatePrefixMethod = typeof(AutoKnifePlugin).GetMethod("UpdatePrefix",
-                        BindingFlags.NonPublic | BindingFlags.Static);
+                        BindingFlags.Public | BindingFlags.Static);
                     if (updatePrefixMethod != null)
                     {
                         var updatePrefix = new HarmonyMethod(updatePrefixMethod);
@@ -221,7 +221,7 @@ namespace AutoKnife
                 if (_hitKnifeMethod != null && _timeAtLastDamageDealtField != null)
                 {
                     var hitKnifePostfixMethod = typeof(AutoKnifePlugin).GetMethod("HitKnifePostfix",
-                        BindingFlags.NonPublic | BindingFlags.Static);
+                        BindingFlags.Public | BindingFlags.Static);
                     if (hitKnifePostfixMethod != null)
                     {
                         var hitKnifePostfix = new HarmonyMethod(hitKnifePostfixMethod);
