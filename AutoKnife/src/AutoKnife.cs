@@ -254,11 +254,13 @@ namespace AutoKnife
                 if (isPlayerDeadField != null)
                 {
                     bool isDead = (bool)isPlayerDeadField.GetValue(__instance);
+                    _staticLogger.LogDebug($"[TAIGU] isPlayerDead: {isDead}");
                     if (isDead) return true;
                 }
 
                 // Check if left mouse button is held down
                 bool mouseHeld = Input.GetMouseButton(0);
+                _staticLogger.LogDebug($"[TAIGU] GetMouseButton(0): {mouseHeld}");
                 if (!mouseHeld)
                 {
                     return true;
