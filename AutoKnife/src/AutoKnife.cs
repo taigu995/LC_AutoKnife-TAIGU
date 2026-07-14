@@ -196,12 +196,19 @@ namespace AutoKnife
         {
             try
             {
-                // Patch PlayerControllerB.Update
-                var updatePrefixMethod = typeof(AutoKnifePlugin).GetMethod("UpdatePrefix",
-                    BindingFlags.NonPublic | BindingFlags.Static);
-                var updatePrefix = new HarmonyMethod(updatePrefixMethod);
-                _harmony.Patch(_updateMethod, prefix: updatePrefix);
-                Logger.LogInfo("[TAIGU] Patched PlayerControllerB.Update");
+                // Patch PlayerControllerB.Update (or fallback)
+                if (_updateMethod != null)
+                {
+                    var updatePrefixMethod = typeof(AutoKnifePlugin).GetMethod("UpdatePrefix",
+                        BindingFlags.NonPublic | BindingFlags.Static);
+                    var updatePrefix = new HarmonyMethod(updatePrefixMethod);
+                    _harmony.Patch(_updateMethod, prefix: updatePrefix);
+                    Logger.LogInfo($"[TAIGU] Patched PlayerControllerB.{_updateMethod.Name}");
+                }
+                else
+                {
+                    Logger.LogError("[TAIGU] Update method not found, auto-attack disabled");
+                }
 
                 // Patch KnifeItem.HitKnife
                 if (_hitKnifeMethod != null && _timeAtLastDamageDealtField != null)
