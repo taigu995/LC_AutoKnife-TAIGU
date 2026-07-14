@@ -201,9 +201,16 @@ namespace AutoKnife
                 {
                     var updatePrefixMethod = typeof(AutoKnifePlugin).GetMethod("UpdatePrefix",
                         BindingFlags.NonPublic | BindingFlags.Static);
-                    var updatePrefix = new HarmonyMethod(updatePrefixMethod);
-                    _harmony.Patch(_updateMethod, prefix: updatePrefix);
-                    Logger.LogInfo($"[TAIGU] Patched PlayerControllerB.{_updateMethod.Name}");
+                    if (updatePrefixMethod != null)
+                    {
+                        var updatePrefix = new HarmonyMethod(updatePrefixMethod);
+                        _harmony.Patch(_updateMethod, prefix: updatePrefix);
+                        Logger.LogInfo($"[TAIGU] Patched PlayerControllerB.{_updateMethod.Name}");
+                    }
+                    else
+                    {
+                        Logger.LogError("[TAIGU] UpdatePrefix method not found");
+                    }
                 }
                 else
                 {
@@ -215,9 +222,16 @@ namespace AutoKnife
                 {
                     var hitKnifePostfixMethod = typeof(AutoKnifePlugin).GetMethod("HitKnifePostfix",
                         BindingFlags.NonPublic | BindingFlags.Static);
-                    var hitKnifePostfix = new HarmonyMethod(hitKnifePostfixMethod);
-                    _harmony.Patch(_hitKnifeMethod, postfix: hitKnifePostfix);
-                    Logger.LogInfo("[TAIGU] Patched KnifeItem.HitKnife");
+                    if (hitKnifePostfixMethod != null)
+                    {
+                        var hitKnifePostfix = new HarmonyMethod(hitKnifePostfixMethod);
+                        _harmony.Patch(_hitKnifeMethod, postfix: hitKnifePostfix);
+                        Logger.LogInfo("[TAIGU] Patched KnifeItem.HitKnife");
+                    }
+                    else
+                    {
+                        Logger.LogError("[TAIGU] HitKnifePostfix method not found");
+                    }
                 }
             }
             catch (Exception ex)
