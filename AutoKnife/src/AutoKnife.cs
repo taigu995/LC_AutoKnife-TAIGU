@@ -12,7 +12,7 @@ namespace AutoKnife
     {
         public const string ModGuid = "TAIGU.AutoKnife";
         public const string ModName = "AutoKnife";
-        public const string ModVersion = "1.0.21";
+        public const string ModVersion = "1.0.22";
 
         private Harmony _harmony;
         private static float _timeAtLastAttack = 0f;
@@ -468,28 +468,34 @@ namespace AutoKnife
                 {
                     _staticLogger.LogInfo($"[TAIGU] Calling ActivateItem_performed...");
                     var parameters = _activateItemMethod.GetParameters();
+                    _staticLogger.LogInfo($"[TAIGU] ActivateItem_performed has {parameters.Length} parameters");
+                    
+                    // Build proper arguments based on parameter types
                     object[] args = new object[parameters.Length];
                     for (int i = 0; i < parameters.Length; i++)
                     {
-                        args[i] = Type.Missing;
+                        var paramType = parameters[i].ParameterType;
+                        _staticLogger.LogInfo($"[TAIGU] Parameter {i}: {paramType.Name}");
+                        
+                        // For struct types (like InputAction.CallbackContext), create default instance
+                        if (paramType.IsValueType)
+                        {
+                            args[i] = System.Activator.CreateInstance(paramType);
+                        }
+                        else
+                        {
+                            args[i] = null;
+                        }
                     }
+                    
                     try
                     {
                         _activateItemMethod.Invoke(__instance, args);
-                        _staticLogger.LogInfo($"[TAIGU] Called ActivateItem_performed with {parameters.Length} parameters");
+                        _staticLogger.LogInfo($"[TAIGU] Called ActivateItem_performed successfully");
                     }
                     catch (Exception ex)
                     {
-                        _staticLogger.LogWarning($"[TAIGU] ActivateItem_performed with args failed: {ex.InnerException?.Message ?? ex.Message}");
-                        try
-                        {
-                            _activateItemMethod.Invoke(__instance, null);
-                            _staticLogger.LogInfo("[TAIGU] Called ActivateItem_performed with null args");
-                        }
-                        catch (Exception ex2)
-                        {
-                            _staticLogger.LogError($"[TAIGU] ActivateItem_performed failed: {ex2.InnerException?.Message ?? ex2.Message}");
-                        }
+                        _staticLogger.LogError($"[TAIGU] ActivateItem_performed failed: {ex.InnerException?.Message ?? ex.Message}");
                     }
                 }
                 else
